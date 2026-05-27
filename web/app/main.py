@@ -23,7 +23,7 @@ from werkzeug.utils import secure_filename
 from io import BytesIO
 
 from auth import autenticar_ad
-from comparador import processar_planilha, gerar_excel, carregar_planilha
+from comparador import processar_planilha, gerar_excel, carregar_planilha, gerar_organograma_data
 
 # ── App ────────────────────────────────────────────────────────────────────
 app = Flask(__name__)
@@ -268,6 +268,42 @@ def colaboradores(id):
         total=len(colaboradores_list),
         total_clt=total_clt,
         total_pj=total_pj,
+    )
+
+
+@app.route("/organograma/<id>")
+@login_required
+def organograma(id):
+    """Exibe o organograma hierárquico do efetivo a partir de um snapshot."""
+    snapshots = list(SNAPSHOTS_DIR.glob(f"snapshot_{id}_*.xlsx"))
+    if not snapshots:
+        flash("Snapshot não encontrado para esta comparação.", "warning")
+        return redirect(url_for("dashboard"))
+
+    snapshot = snapshots[0]
+    df = carregar_planilha(snapshot)
+
+    historico = carregar_historico()
+    meta = next((h for h in historico if h["id"] == id), {})
+
+    colab_list = []
+    for chave, row in df.iterrows():
+        tipo = "PJ" if chave.startswith("PJ::") else "CLT"
+        colab_list.append({
+            "tipo":         tipo,
+            "nome":         str(row.get("NOME", "")),
+            "cargo":        str(row.get("CARGO", "")),
+            "departamento": str(row.get("DEPARTAMENTO", "")),
+            "gestor":       str(row.get("GESTOR", "")),
+        })
+
+    arvore = gerar_organograma_data(colab_list)
+
+    return render_template(
+        "organograma.html",
+        arvore=arvore,
+        meta=meta,
+        total=len(colab_list),
     )
 
 

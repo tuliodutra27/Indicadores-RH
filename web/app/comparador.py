@@ -413,3 +413,55 @@ def gerar_excel(resultado: dict) -> bytes:
     wb.save(buf)
     buf.seek(0)
     return buf.read()
+
+
+# ── Organograma ────────────────────────────────────────────────────────────
+
+def gerar_organograma_data(colaboradores: list[dict]) -> list[dict]:
+    """
+    Gera lista plana de nós para renderização do organograma com d3.stratify().
+
+    Cada nó: {id, parentId, name, cargo, departamento, tipo}
+
+    Regras:
+    - Nome normalizado (upper/strip) para casar campo "gestor" com outro colaborador.
+    - Auto-referência (gestor == próprio nome) tratada como raiz.
+    - Se há múltiplas raízes, insere nó virtual "ALISEO SA" para unificar a árvore.
+    """
+    # Mapeia nome normalizado → id do nó (primeira ocorrência)
+    por_nome: dict[str, str] = {}
+    for i, c in enumerate(colaboradores):
+        nome_up = (c.get("nome") or "").upper().strip()
+        if nome_up and nome_up not in por_nome:
+            por_nome[nome_up] = str(i + 1)
+
+    nodes: list[dict] = []
+    for i, c in enumerate(colaboradores):
+        node_id   = str(i + 1)
+        gestor_up = (c.get("gestor") or "").upper().strip()
+        parent_id = por_nome.get(gestor_up, "")
+        if parent_id == node_id:   # auto-referência → vira raiz
+            parent_id = ""
+
+        nodes.append({
+            "id":           node_id,
+            "parentId":     parent_id,
+            "name":         c.get("nome", ""),
+            "cargo":        c.get("cargo", ""),
+            "departamento": c.get("departamento", ""),
+            "tipo":         c.get("tipo", ""),
+        })
+
+    # Se múltiplas raízes, cria nó virtual para unificar a árvore
+    raizes = [n for n in nodes if not n["parentId"]]
+    if len(raizes) > 1:
+        nodes.insert(0, {
+            "id": "0", "parentId": "",
+            "name": "ALISEO SA", "cargo": "Conselho de Administração",
+            "departamento": "", "tipo": "",
+        })
+        for n in nodes:
+            if n["id"] != "0" and not n["parentId"]:
+                n["parentId"] = "0"
+
+    return nodes

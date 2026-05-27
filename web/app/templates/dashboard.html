@@ -165,18 +165,22 @@
           <td class="text-muted small">{{ item.usuario or '—' }}</td>
 
           <td class="text-end">
-            {% if not item.is_baseline %}
             <div class="btn-group btn-group-sm">
+              <a href="{{ url_for('organograma', id=item.id) }}"
+                 class="btn btn-outline-primary" title="Ver organograma">
+                <i class="bi bi-diagram-3"></i>
+              </a>
+              {% if not item.is_baseline %}
               <a href="{{ url_for('resultado', id=item.id) }}"
-                 class="btn btn-outline-primary" title="Ver resultado">
+                 class="btn btn-outline-secondary" title="Ver resultado">
                 <i class="bi bi-eye"></i>
               </a>
               <a href="{{ url_for('download', id=item.id) }}"
                  class="btn btn-outline-secondary" title="Baixar Excel">
                 <i class="bi bi-file-earmark-excel"></i>
               </a>
+              {% endif %}
             </div>
-            {% endif %}
           </td>
         </tr>
         {% endfor %}

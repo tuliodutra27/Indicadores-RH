@@ -11,6 +11,9 @@
       <a href="{{ url_for('dashboard') }}" class="btn btn-sm btn-outline-secondary">
         <i class="bi bi-arrow-left me-1"></i>Dashboard
       </a>
+      <a href="{{ url_for('organograma', id=meta.id) }}" class="btn btn-sm btn-outline-primary">
+        <i class="bi bi-diagram-3 me-1"></i>Organograma
+      </a>
       {% if not meta.get('is_baseline') %}
       <a href="{{ url_for('resultado', id=meta.id) }}" class="btn btn-sm btn-outline-primary">
         <i class="bi bi-file-earmark-bar-graph me-1"></i>Ver comparação
