@@ -83,31 +83,43 @@ def autenticar_ad(usuario: str, senha: str) -> tuple[bool, str]:
             else usuario
         )
 
-        # Verifica pertencimento ao grupo TI
+        # Verifica pertencimento a pelo menos um dos grupos permitidos
+        # AD_TI_GROUP_CN aceita múltiplos grupos separados por ";"
+        # Ex: "GRP_SA_OPE_TI_RW;GRP_SA_OPE_DIRETORIA_RW"
         member_of = []
         if entry.memberOf:
             member_of = [str(g).upper() for g in entry.memberOf.values]
 
-        # Normaliza AD_TI_GROUP_CN: aceita "TI", "CN=TI" ou DN completo
-        # Ex: "GRP_SA_OPE_TI_RW"
-        #     "CN=GRP_SA_OPE_TI_RW"
-        #     "CN=GRP_SA_OPE_TI_RW,OU=Seguranca,DC=..."
-        _group_raw = AD_TI_GROUP_CN.strip()
-        if "," in _group_raw:
-            # DN completo → extrai apenas o primeiro componente (CN=xxx)
-            _group_raw = _group_raw.split(",")[0].strip()
-        if _group_raw.upper().startswith("CN="):
-            # Remove o prefixo "CN=" se o usuário já o incluiu
-            _group_raw = _group_raw[3:]
-        group_cn_check = f"CN={_group_raw.upper()},"
-        in_group = any(group_cn_check in g for g in member_of)
+        def _normalizar_grupo(raw: str) -> str:
+            """Extrai só o CN independente do formato fornecido."""
+            raw = raw.strip()
+            # DN completo (tem vírgula) → pega só o primeiro componente
+            if "," in raw:
+                raw = raw.split(",")[0].strip()
+            # Remove prefixo CN= se presente
+            if raw.upper().startswith("CN="):
+                raw = raw[3:]
+            return raw.upper()
+
+        grupos_permitidos = [
+            _normalizar_grupo(g)
+            for g in AD_TI_GROUP_CN.split(";")
+            if g.strip()
+        ]
+
+        in_group = any(
+            f"CN={grupo}," in membro
+            for grupo in grupos_permitidos
+            for membro in member_of
+        )
 
         conn.unbind()
 
         if not in_group:
+            nomes = ", ".join(grupos_permitidos)
             return (
                 False,
-                f"Acesso negado. Apenas usuários do grupo '{_group_raw}' "
+                f"Acesso negado. Apenas usuários dos grupos [{nomes}] "
                 "têm permissão para acessar este sistema.",
             )
 
