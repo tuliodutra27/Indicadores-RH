@@ -42,7 +42,7 @@
       <button class="btn btn-outline-secondary" onclick="ajustarTela()" title="Centralizar e ajustar zoom">
         <i class="bi bi-aspect-ratio"></i>
       </button>
-      <button class="btn btn-outline-secondary" onclick="limparDrag()" title="Desfazer reposicionamentos manuais">
+      <button class="btn btn-outline-secondary" onclick="limparDrag()" title="Desfazer reposicionamentos visuais">
         <i class="bi bi-arrow-counterclockwise"></i>
       </button>
     </div>
@@ -50,12 +50,41 @@
             onclick="toggleFullscreen()" title="Tela cheia">
       <i class="bi bi-fullscreen"></i>
     </button>
+    <button class="btn btn-sm btn-outline-warning" onclick="abrirHistorico()"
+            title="Log de alterações e restauração">
+      <i class="bi bi-clock-history me-1"></i>Histórico
+    </button>
     <button class="btn btn-sm btn-outline-success" onclick="exportarPDF()" title="Exportar / Imprimir PDF">
       <i class="bi bi-file-earmark-pdf me-1"></i>PDF
     </button>
     <button class="btn btn-sm btn-outline-secondary" onclick="exportarSVG()" title="Baixar SVG">
       <i class="bi bi-download me-1"></i>SVG
     </button>
+  </div>
+</div>
+
+<!-- Banner de erro de hierarquia (ciclo ou referência inválida) -->
+<div id="banner-erro-hierarquia" class="alert alert-danger d-none mb-3">
+  <div class="d-flex align-items-start gap-3">
+    <i class="bi bi-exclamation-octagon-fill fs-4 flex-shrink-0 mt-1"></i>
+    <div class="flex-grow-1">
+      <strong>Erro na hierarquia do organograma</strong>
+      <p class="mb-1 mt-1" id="msg-erro-hierarquia">
+        Existe um ciclo ou referência inválida que impede a renderização.
+      </p>
+      <p class="small text-danger-emphasis mb-0">
+        Use o <strong>Histórico</strong> para restaurar um ponto anterior válido,
+        ou importe o arquivo JSON correto.
+      </p>
+    </div>
+    <div class="d-flex flex-column gap-2 flex-shrink-0">
+      <button class="btn btn-sm btn-danger" onclick="abrirHistorico()">
+        <i class="bi bi-clock-history me-1"></i>Restaurar do histórico
+      </button>
+      <button class="btn btn-sm btn-outline-danger" onclick="abrirImportar()">
+        <i class="bi bi-upload me-1"></i>Importar JSON
+      </button>
+    </div>
   </div>
 </div>
 
@@ -220,6 +249,71 @@
         <button type="button" class="btn btn-primary px-4" id="btn-salvar-pai"
                 onclick="salvarNovoPai()">
           <i class="bi bi-check-lg me-1"></i>Salvar posição
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Modal Histórico de alterações ───────────────────────────────────────── -->
+<div class="modal fade" id="modalHistorico" tabindex="-1" aria-labelledby="modalHistoricoLabel">
+  <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+    <div class="modal-content shadow">
+      <div class="modal-header border-0 pb-0">
+        <h5 class="modal-title fw-bold" id="modalHistoricoLabel">
+          <i class="bi bi-clock-history text-warning me-2"></i>Histórico de alterações
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body pt-2">
+        <p class="text-muted small mb-3">
+          Cada linha é um <strong>ponto de restauração</strong> — o estado do organograma
+          <em>antes</em> daquela alteração. Ao restaurar, o estado atual vira um novo backup.
+        </p>
+        <!-- Ações rápidas -->
+        <div class="d-flex gap-2 mb-3 flex-wrap">
+          <button class="btn btn-sm btn-outline-warning" onclick="abrirImportar()">
+            <i class="bi bi-upload me-1"></i>Importar JSON completo
+          </button>
+        </div>
+        <div id="corpo-historico">
+          <div class="text-center py-4">
+            <div class="spinner-border spinner-border-sm text-secondary me-2"></div>
+            Carregando...
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer border-0 pt-0">
+        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Fechar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Modal Importar JSON ──────────────────────────────────────────────────── -->
+<div class="modal fade" id="modalImportar" tabindex="-1" aria-labelledby="modalImportarLabel">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content shadow">
+      <div class="modal-header border-0 pb-0">
+        <h5 class="modal-title fw-bold" id="modalImportarLabel">
+          <i class="bi bi-upload text-primary me-2"></i>Importar organograma_estrutura.json
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-info small">
+          <i class="bi bi-info-circle me-1"></i>
+          O estado atual será salvo como backup antes da importação.
+          Você pode desfazer pelo <strong>Histórico</strong>.
+        </div>
+        <label class="form-label fw-semibold">Selecione o arquivo JSON:</label>
+        <input type="file" id="input-importar-json" class="form-control mb-2" accept=".json">
+        <div id="msg-importar" class="small text-muted"></div>
+      </div>
+      <div class="modal-footer border-0 pt-0">
+        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btn-importar" onclick="executarImportar()">
+          <i class="bi bi-upload me-1"></i>Importar e restaurar
         </button>
       </div>
     </div>
@@ -395,12 +489,17 @@ function redrawLinks() {
 
 // ── Hierarquia D3 ─────────────────────────────────────────────────────────────
 let root;
+let erroHierarquia = null;
 try {
   root = d3.stratify().id(d=>d.id).parentId(d=>d.parentId)(FLAT_DATA);
 } catch(err) {
+  erroHierarquia = err.message;
   console.error('Erro ao construir hierarquia:', err);
+  document.getElementById('msg-erro-hierarquia').textContent =
+    `Detalhe técnico: ${err.message}`;
+  document.getElementById('banner-erro-hierarquia').classList.remove('d-none');
   document.getElementById('org-status').innerHTML =
-    `<span class="text-danger"><i class="bi bi-x-circle me-1"></i>${err.message}</span>`;
+    `<span class="text-danger"><i class="bi bi-x-circle me-1"></i>Erro na hierarquia — use o Histórico para restaurar</span>`;
 }
 
 if (root) {
@@ -775,30 +874,206 @@ async function salvarNovoPai() {
   const adicionais = Array.from(
     document.querySelectorAll('#lista-adicionais input[type=checkbox]:checked')
   ).map(el => el.value);
+  const nomePessoa = editandoNode.data.name;
 
   const btn = document.getElementById('btn-salvar-pai');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Salvando...';
 
   try {
-    const [r1, r2] = await Promise.all([
-      fetch('/api/organograma/posicao', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({chave: editandoNode.data.chave, parentChave: novoParent}),
+    // 1. Salvar posição principal
+    const r1 = await fetch('/api/organograma/posicao', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        chave:       editandoNode.data.chave,
+        parentChave: novoParent,
+        nomePessoa,
       }),
-      fetch('/api/organograma/relacoes', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({filho: editandoNode.data.chave, pais: adicionais}),
-      }),
-    ]);
-    if (!r1.ok) throw new Error(`posição: HTTP ${r1.status}`);
+    });
+    const d1 = await r1.json();
+    if (!r1.ok) {
+      // Erro especial de ciclo
+      if (d1.ciclo) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Salvar posição';
+        mostrarErroCiclo(d1.erro);
+        return;
+      }
+      throw new Error(d1.erro || `HTTP ${r1.status}`);
+    }
+
+    // 2. Salvar relações adicionais
+    const r2 = await fetch('/api/organograma/relacoes', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({filho: editandoNode.data.chave, pais: adicionais, nomePessoa}),
+    });
     if (!r2.ok) throw new Error(`relações: HTTP ${r2.status}`);
+
     location.reload();
   } catch(err) {
     btn.disabled = false;
     btn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Salvar posição';
     alert('Erro ao salvar: ' + err.message);
   }
+}
+
+function mostrarErroCiclo(msg) {
+  // Mostra alerta de ciclo dentro do modal (não fecha)
+  let div = document.getElementById('alerta-ciclo');
+  if (!div) {
+    div = document.createElement('div');
+    div.id = 'alerta-ciclo';
+    div.className = 'alert alert-danger mt-3 mb-0';
+    document.getElementById('btn-salvar-pai').closest('.modal-footer').before(div);
+  }
+  div.innerHTML = `<i class="bi bi-arrow-repeat me-2"></i><strong>Ciclo detectado!</strong> ${msg}`;
+  div.style.display = 'block';
+  setTimeout(() => { if(div) div.style.display='none'; }, 8000);
+}
+
+// ── Histórico de alterações ───────────────────────────────────────────────────
+let _modalHistorico = null;
+
+async function abrirHistorico() {
+  _modalHistorico = _modalHistorico || new bootstrap.Modal(document.getElementById('modalHistorico'));
+  _modalHistorico.show();
+
+  const corpo = document.getElementById('corpo-historico');
+  corpo.innerHTML = '<div class="text-center py-4"><div class="spinner-border spinner-border-sm text-secondary"></div> Carregando...</div>';
+
+  try {
+    const resp = await fetch('/api/organograma/historico');
+    const data = await resp.json();
+    const hist = data.historico || [];
+
+    if (!hist.length) {
+      corpo.innerHTML = '<p class="text-muted text-center py-3">Nenhuma alteração registrada ainda.</p>';
+      return;
+    }
+
+    corpo.innerHTML = '';
+    const table = document.createElement('table');
+    table.className = 'table table-sm table-hover align-middle mb-0';
+    table.innerHTML = `
+      <thead class="table-dark">
+        <tr>
+          <th style="width:145px">Data/Hora</th>
+          <th style="width:110px">Usuário</th>
+          <th>Ação (ponto anterior)</th>
+          <th style="width:70px">Nós</th>
+          <th style="width:100px"></th>
+        </tr>
+      </thead>
+      <tbody id="tbody-historico"></tbody>`;
+    corpo.appendChild(table);
+
+    const tbody = document.getElementById('tbody-historico');
+    hist.forEach((item, idx) => {
+      const dt = item.ts ? item.ts.replace('T',' ').slice(0,16) : '—';
+      const tr = document.createElement('tr');
+      if (idx === 0) tr.classList.add('table-warning');
+      tr.innerHTML = `
+        <td class="font-monospace small">${dt}</td>
+        <td class="small">${item.usuario || '—'}</td>
+        <td class="small">${escHtml(item.acao || '—')}</td>
+        <td class="text-center small">${item.n_posicoes}</td>
+        <td>
+          <button class="btn btn-xs btn-outline-primary py-0 px-2"
+                  style="font-size:.75rem"
+                  onclick="restaurarSnap('${item.ts}', this)">
+            <i class="bi bi-arrow-counterclockwise me-1"></i>Restaurar
+          </button>
+        </td>`;
+      tbody.appendChild(tr);
+    });
+
+    // Primeiro item = mais recente → destaque especial
+    const first = tbody.querySelector('tr');
+    if (first) {
+      first.querySelector('button').textContent = '';
+      first.querySelector('button').innerHTML =
+        '<i class="bi bi-arrow-counterclockwise me-1"></i>Restaurar (mais recente)';
+    }
+  } catch(err) {
+    corpo.innerHTML = `<div class="alert alert-danger">Erro ao carregar histórico: ${err.message}</div>`;
+  }
+}
+
+async function restaurarSnap(ts, btnEl) {
+  if (!confirm('Restaurar para este ponto? O estado atual ficará salvo como backup no histórico.')) return;
+  btnEl.disabled = true;
+  btnEl.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+  try {
+    const resp = await fetch('/api/organograma/restaurar', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ts}),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.erro || `HTTP ${resp.status}`);
+    location.reload();
+  } catch(err) {
+    btnEl.disabled = false;
+    btnEl.innerHTML = '<i class="bi bi-arrow-counterclockwise me-1"></i>Restaurar';
+    alert('Erro ao restaurar: ' + err.message);
+  }
+}
+
+// ── Importar JSON ─────────────────────────────────────────────────────────────
+let _modalImportar = null;
+
+function abrirImportar() {
+  // Fecha modal de histórico se estiver aberto
+  _modalHistorico?.hide();
+  _modalImportar = _modalImportar || new bootstrap.Modal(document.getElementById('modalImportar'));
+  document.getElementById('msg-importar').textContent = '';
+  document.getElementById('input-importar-json').value = '';
+  _modalImportar.show();
+}
+
+async function executarImportar() {
+  const fileInput = document.getElementById('input-importar-json');
+  const msgEl     = document.getElementById('msg-importar');
+  const btn       = document.getElementById('btn-importar');
+
+  if (!fileInput.files.length) {
+    msgEl.textContent = 'Selecione um arquivo JSON.';
+    msgEl.className   = 'small text-danger';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Importando...';
+  msgEl.textContent = '';
+
+  try {
+    const text    = await fileInput.files[0].text();
+    const payload = JSON.parse(text);
+
+    if (!payload.posicoes) {
+      throw new Error('JSON inválido: campo "posicoes" não encontrado.');
+    }
+
+    const resp = await fetch('/api/organograma/importar', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.erro || `HTTP ${resp.status}`);
+
+    msgEl.textContent = `✅ Importado com sucesso! ${Object.keys(payload.posicoes).length} posições.`;
+    msgEl.className   = 'small text-success';
+    setTimeout(() => location.reload(), 1200);
+  } catch(err) {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-upload me-1"></i>Importar e restaurar';
+    msgEl.textContent = '❌ ' + err.message;
+    msgEl.className   = 'small text-danger';
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 // ── Aceitar todas as sugestões em lote ───────────────────────────────────────

@@ -27,6 +27,8 @@ from comparador import (
     processar_planilha, gerar_excel, carregar_planilha,
     carregar_estrutura_org, salvar_posicao_org, salvar_posicoes_org,
     salvar_relacoes_org, gerar_organograma_hibrido,
+    validar_posicao_org, carregar_historico_org,
+    restaurar_snapshot_org, importar_estrutura_org,
 )
 
 # ── App ────────────────────────────────────────────────────────────────────
@@ -338,10 +340,20 @@ def api_salvar_posicao_org():
     data = request.get_json(silent=True) or {}
     chave        = data.get("chave", "").strip()
     parent_chave = data.get("parentChave", "").strip()
+    nome_pessoa  = data.get("nomePessoa", chave)
     if not chave or chave == "__ROOT__":
         return {"ok": False, "erro": "chave inválida"}, 400
+
+    # Valida se não cria ciclo
+    struct = carregar_estrutura_org(DATA_DIR)
+    ok_ciclo, msg_ciclo = validar_posicao_org(struct["posicoes"], chave, parent_chave)
+    if not ok_ciclo:
+        return {"ok": False, "erro": msg_ciclo, "ciclo": True}, 409
+
+    pai_label = parent_chave if parent_chave and parent_chave != "__ROOT__" else "Conselho"
+    acao = f"Posição: {nome_pessoa} → {pai_label}"
     try:
-        salvar_posicao_org(DATA_DIR, chave, parent_chave, session.get("usuario", ""))
+        salvar_posicao_org(DATA_DIR, chave, parent_chave, session.get("usuario", ""), acao=acao)
         return {"ok": True}
     except Exception as exc:
         return {"ok": False, "erro": str(exc)}, 500
@@ -351,13 +363,53 @@ def api_salvar_posicao_org():
 @login_required
 def api_salvar_relacoes_org():
     """Salva os gestores adicionais (múltiplos) de UM colaborador (AJAX)."""
-    data  = request.get_json(silent=True) or {}
-    filho = data.get("filho", "").strip()
-    pais  = data.get("pais", [])
+    data       = request.get_json(silent=True) or {}
+    filho      = data.get("filho", "").strip()
+    pais       = data.get("pais", [])
+    nome_filho = data.get("nomePessoa", filho)
     if not filho or filho == "__ROOT__":
         return {"ok": False, "erro": "filho inválido"}, 400
+    n = len(pais)
+    acao = f"Gestores adicionais de {nome_filho}: {n} selecionado(s)"
     try:
-        salvar_relacoes_org(DATA_DIR, filho, pais, session.get("usuario", ""))
+        salvar_relacoes_org(DATA_DIR, filho, pais, session.get("usuario", ""), acao=acao)
+        return {"ok": True}
+    except Exception as exc:
+        return {"ok": False, "erro": str(exc)}, 500
+
+
+@app.route("/api/organograma/historico", methods=["GET"])
+@login_required
+def api_historico_org():
+    """Retorna o log de alterações do organograma."""
+    return {"historico": carregar_historico_org(DATA_DIR)}
+
+
+@app.route("/api/organograma/restaurar", methods=["POST"])
+@login_required
+def api_restaurar_org():
+    """Restaura o organograma para um snapshot específico."""
+    data = request.get_json(silent=True) or {}
+    ts   = data.get("ts", "").strip()
+    if not ts:
+        return {"ok": False, "erro": "timestamp inválido"}, 400
+    ok, msg = restaurar_snapshot_org(DATA_DIR, ts, session.get("usuario", ""))
+    if ok:
+        return {"ok": True, "msg": msg}
+    return {"ok": False, "erro": msg}, 400
+
+
+@app.route("/api/organograma/importar", methods=["POST"])
+@login_required
+def api_importar_org():
+    """Importa/substitui toda a estrutura do organograma (JSON completo)."""
+    data     = request.get_json(silent=True) or {}
+    posicoes = data.get("posicoes")
+    relacoes = data.get("relacoes_adicionais", data.get("relacoes", []))
+    if posicoes is None:
+        return {"ok": False, "erro": "JSON inválido: campo 'posicoes' ausente."}, 400
+    try:
+        importar_estrutura_org(DATA_DIR, posicoes, relacoes, session.get("usuario", ""))
         return {"ok": True}
     except Exception as exc:
         return {"ok": False, "erro": str(exc)}, 500

@@ -546,27 +546,43 @@ def carregar_estrutura_org(data_dir: Path) -> dict:
 def _gravar_org_json(
     data_dir: Path, posicoes_novas: dict, usuario: str,
     relacoes_novas: list | None = None,
+    acao: str = "",
 ) -> None:
-    """Merge incremental das posições e relações adicionais no arquivo JSON."""
+    """Merge incremental com histórico de snapshots (últimos 30)."""
     path   = data_dir / _ORG_FILE
-    dados: dict = {"versao": 2, "posicoes": {}, "relacoes_adicionais": []}
+    dados: dict = {"versao": 3, "posicoes": {}, "relacoes_adicionais": [], "snapshots": []}
     if path.exists():
         try:
             with open(path, encoding="utf-8") as f:
                 dados = json.load(f)
         except Exception:
             pass
-    dados.setdefault("posicoes", {}).update(posicoes_novas)
+    dados.setdefault("posicoes", {})
     dados.setdefault("relacoes_adicionais", [])
+    dados.setdefault("snapshots", [])
+
+    # ── Snapshot do estado ANTES da alteração (permite desfazer) ─────────
+    dados["snapshots"].append({
+        "ts":       datetime.now().isoformat(),
+        "usuario":  usuario,
+        "acao":     acao or "Alteração manual",
+        "posicoes": dict(dados["posicoes"]),
+        "relacoes": list(dados["relacoes_adicionais"]),
+    })
+    if len(dados["snapshots"]) > 30:
+        dados["snapshots"] = dados["snapshots"][-30:]
+
+    # ── Aplica as mudanças ────────────────────────────────────────────────
+    dados["posicoes"].update(posicoes_novas)
     if relacoes_novas is not None:
-        # Remove entradas antigas para os filhos que estão sendo atualizados
         filhos_novos = {r["filho"] for r in relacoes_novas}
         dados["relacoes_adicionais"] = [
             r for r in dados["relacoes_adicionais"]
             if r.get("filho") not in filhos_novos
         ]
         dados["relacoes_adicionais"].extend(relacoes_novas)
-    dados["versao"]         = 2
+
+    dados["versao"]         = 3
     dados["atualizado_em"]  = datetime.now().isoformat()
     dados["atualizado_por"] = usuario
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -575,31 +591,163 @@ def _gravar_org_json(
 
 
 def salvar_posicao_org(
-    data_dir: Path, chave: str, parent_chave: str, usuario: str = ""
+    data_dir: Path, chave: str, parent_chave: str,
+    usuario: str = "", acao: str = ""
 ) -> None:
     """Salva (ou atualiza) a posição hierárquica de UM colaborador."""
-    _gravar_org_json(data_dir, {chave: parent_chave}, usuario)
+    _gravar_org_json(data_dir, {chave: parent_chave}, usuario, acao=acao)
 
 
 def salvar_posicoes_org(
     data_dir: Path, posicoes: dict, usuario: str = ""
 ) -> None:
     """Salva/atualiza posições de MÚLTIPLOS colaboradores de uma vez."""
-    _gravar_org_json(data_dir, posicoes, usuario)
+    _gravar_org_json(data_dir, posicoes, usuario, acao="Aceitou sugestões automáticas em lote")
 
 
 def salvar_relacoes_org(
-    data_dir: Path, filho: str, pais_adicionais: list, usuario: str = ""
+    data_dir: Path, filho: str, pais_adicionais: list,
+    usuario: str = "", acao: str = ""
 ) -> None:
-    """Salva/substitui os gestores adicionais (múltiplos) de UM colaborador.
-    Passa lista vazia para remover todas as relações adicionais deste filho.
-    """
+    """Salva/substitui os gestores adicionais (múltiplos) de UM colaborador."""
     relacoes = [
         {"filho": filho, "pai": pai}
         for pai in pais_adicionais
         if pai and pai != filho
     ]
-    _gravar_org_json(data_dir, {}, usuario, relacoes)
+    _gravar_org_json(data_dir, {}, usuario, relacoes, acao=acao)
+
+
+# ── Validação e histórico ─────────────────────────────────────────────────────
+
+def validar_posicao_org(posicoes: dict, chave: str, novo_pai: str) -> tuple[bool, str]:
+    """
+    Verifica se definir chave → novo_pai criaria um ciclo na hierarquia.
+    Retorna (ok: bool, mensagem_de_erro: str).
+    """
+    if not novo_pai or novo_pai in ("", "__ROOT__"):
+        return True, ""
+    if novo_pai == chave:
+        return False, "Um nó não pode reportar a si mesmo."
+    visitados: set[str] = set()
+    atual = novo_pai
+    while atual and atual not in ("", "__ROOT__"):
+        if atual == chave:
+            return False, (
+                "A operação criaria um ciclo: o superior selecionado "
+                "já está subordinado a esta pessoa na hierarquia atual."
+            )
+        if atual in visitados:
+            break  # já há ciclo pré-existente; para para não travar
+        visitados.add(atual)
+        atual = posicoes.get(atual, "")
+    return True, ""
+
+
+def carregar_historico_org(data_dir: Path) -> list:
+    """
+    Retorna os snapshots salvos (metadados apenas, sem o conteúdo completo).
+    Ordem: mais recente primeiro.
+    """
+    try:
+        path = data_dir / _ORG_FILE
+        if path.exists():
+            with open(path, encoding="utf-8") as f:
+                dados = json.load(f)
+            snaps = dados.get("snapshots", [])
+            return [
+                {
+                    "ts":         s["ts"],
+                    "usuario":    s.get("usuario", ""),
+                    "acao":       s.get("acao", ""),
+                    "n_posicoes": len(s.get("posicoes", {})),
+                }
+                for s in reversed(snaps)
+            ]
+    except Exception:
+        pass
+    return []
+
+
+def restaurar_snapshot_org(data_dir: Path, ts: str, usuario: str) -> tuple[bool, str]:
+    """
+    Restaura o estado de um snapshot específico (identificado pelo timestamp).
+    Salva o estado atual como um snapshot de backup antes de restaurar.
+    Retorna (ok: bool, mensagem: str).
+    """
+    try:
+        path = data_dir / _ORG_FILE
+        if not path.exists():
+            return False, "Arquivo de estrutura não encontrado."
+        with open(path, encoding="utf-8") as f:
+            dados = json.load(f)
+        snaps = dados.get("snapshots", [])
+        snap  = next((s for s in snaps if s["ts"] == ts), None)
+        if not snap:
+            return False, f"Snapshot '{ts}' não encontrado."
+
+        # Salva o estado atual como backup antes de restaurar
+        dados.setdefault("snapshots", []).append({
+            "ts":       datetime.now().isoformat(),
+            "usuario":  usuario,
+            "acao":     f"(backup antes de restaurar ponto {ts[:16]})",
+            "posicoes": dict(dados.get("posicoes", {})),
+            "relacoes": list(dados.get("relacoes_adicionais", [])),
+        })
+
+        # Restaura
+        dados["posicoes"]            = snap["posicoes"]
+        dados["relacoes_adicionais"] = snap.get("relacoes", [])
+        dados["versao"]              = 3
+        dados["atualizado_em"]       = datetime.now().isoformat()
+        dados["atualizado_por"]      = usuario
+
+        if len(dados["snapshots"]) > 30:
+            dados["snapshots"] = dados["snapshots"][-30:]
+
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(dados, f, ensure_ascii=False, indent=2)
+        return True, "Restaurado com sucesso."
+    except Exception as exc:
+        return False, str(exc)
+
+
+def importar_estrutura_org(
+    data_dir: Path, posicoes: dict, relacoes: list, usuario: str
+) -> None:
+    """
+    Importa/substitui a estrutura completa do organograma.
+    Preserva o histórico de snapshots existente.
+    """
+    path  = data_dir / _ORG_FILE
+    dados: dict = {"versao": 3, "posicoes": {}, "relacoes_adicionais": [], "snapshots": []}
+    if path.exists():
+        try:
+            with open(path, encoding="utf-8") as f:
+                dados = json.load(f)
+        except Exception:
+            pass
+    dados.setdefault("snapshots", [])
+
+    # Backup antes de importar
+    dados["snapshots"].append({
+        "ts":       datetime.now().isoformat(),
+        "usuario":  usuario,
+        "acao":     "Backup antes de importação manual",
+        "posicoes": dict(dados.get("posicoes", {})),
+        "relacoes": list(dados.get("relacoes_adicionais", [])),
+    })
+    if len(dados["snapshots"]) > 30:
+        dados["snapshots"] = dados["snapshots"][-30:]
+
+    dados["posicoes"]            = posicoes
+    dados["relacoes_adicionais"] = relacoes
+    dados["versao"]              = 3
+    dados["atualizado_em"]       = datetime.now().isoformat()
+    dados["atualizado_por"]      = usuario
+    data_dir.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(dados, f, ensure_ascii=False, indent=2)
 
 
 def gerar_organograma_hibrido(
