@@ -88,7 +88,18 @@ def autenticar_ad(usuario: str, senha: str) -> tuple[bool, str]:
         if entry.memberOf:
             member_of = [str(g).upper() for g in entry.memberOf.values]
 
-        group_cn_check = f"CN={AD_TI_GROUP_CN.upper()},"
+        # Normaliza AD_TI_GROUP_CN: aceita "TI", "CN=TI" ou DN completo
+        # Ex: "GRP_SA_OPE_TI_RW"
+        #     "CN=GRP_SA_OPE_TI_RW"
+        #     "CN=GRP_SA_OPE_TI_RW,OU=Seguranca,DC=..."
+        _group_raw = AD_TI_GROUP_CN.strip()
+        if "," in _group_raw:
+            # DN completo → extrai apenas o primeiro componente (CN=xxx)
+            _group_raw = _group_raw.split(",")[0].strip()
+        if _group_raw.upper().startswith("CN="):
+            # Remove o prefixo "CN=" se o usuário já o incluiu
+            _group_raw = _group_raw[3:]
+        group_cn_check = f"CN={_group_raw.upper()},"
         in_group = any(group_cn_check in g for g in member_of)
 
         conn.unbind()
@@ -96,7 +107,7 @@ def autenticar_ad(usuario: str, senha: str) -> tuple[bool, str]:
         if not in_group:
             return (
                 False,
-                f"Acesso negado. Apenas usuários do grupo '{AD_TI_GROUP_CN}' "
+                f"Acesso negado. Apenas usuários do grupo '{_group_raw}' "
                 "têm permissão para acessar este sistema.",
             )
 
