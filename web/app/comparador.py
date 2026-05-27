@@ -6,6 +6,7 @@ Portado e adaptado de comparador_rh_v2.py para uso web.
 import re
 import shutil
 import json
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 from io import BytesIO
@@ -415,50 +416,170 @@ def gerar_excel(resultado: dict) -> bytes:
     return buf.read()
 
 
-# ── Organograma ────────────────────────────────────────────────────────────
+# ── Organograma — análise semântica de cargos ─────────────────────────────
+
+def _org_normalizar(texto: str) -> str:
+    """Minúsculas, sem acentos, sem espaços duplos."""
+    if not texto:
+        return ""
+    t = str(texto).lower().strip()
+    t = unicodedata.normalize("NFD", t)
+    t = "".join(c for c in t if unicodedata.category(c) != "Mn")
+    return re.sub(r"\s+", " ", t)
+
+
+# Níveis hierárquicos: 0 = topo, maior = mais operacional.
+# Ordem importa: mais específico primeiro.
+_NIVEL_RULES: list[tuple[int, list[str]]] = [
+    (0, ["conselho de administracao", "presidente executivo", "ceo"]),
+    (1, ["superintendente"]),
+    (2, ["diretor executivo", "diretor geral", "diretor", "diretora", "vice-presidente"]),
+    (3, ["gerente"]),
+    (4, ["coordenador", "coordenadora"]),
+    (5, ["supervisor", "supervisora", "lider", "lider de equipe", "chefe de"]),
+    (6, ["analista", "especialista", "engenheiro", "engenheira",
+          "contador", "contadora", "tecnologo", "tecnologa", "desenvolvedor", "desenvolvedora"]),
+    (7, ["tecnico", "tecnica"]),
+    (8, ["assistente", "auxiliar", "ajudante", "operador", "operadora",
+          "motorista", "mecanico", "mecanica", "eletricista", "soldador",
+          "zelador", "porteiro", "recepcionista", "almoxarife"]),
+    (9, ["estagiario", "estagiaria", "aprendiz", "jovem aprendiz"]),
+]
+
+
+def _nivel_cargo(cargo: str) -> int:
+    """Retorna o nível hierárquico (0 = mais alto) com base nas palavras-chave do cargo."""
+    c = _org_normalizar(cargo)
+    for nivel, kws in _NIVEL_RULES:
+        if any(kw in c for kw in kws):
+            return nivel
+    return 7  # default: nível técnico/operacional
+
+
+# Palavras ignoradas ao extrair a área do cargo
+_AREA_STOPWORDS = {
+    "de", "da", "do", "das", "dos", "e", "a", "o", "as", "os",
+    "em", "no", "na", "nos", "nas", "para", "por", "com", "um", "uma",
+    # títulos que definem nível (removidos para obter só a área)
+    "superintendente", "gerente", "diretor", "diretora",
+    "coordenador", "coordenadora", "supervisor", "supervisora",
+    "analista", "especialista", "engenheiro", "engenheira",
+    "tecnico", "tecnica", "assistente", "auxiliar",
+    "operador", "operadora", "ajudante", "lider", "chefe",
+    "estagiario", "estagiaria", "aprendiz", "contador", "contadora",
+    "desenvolvedor", "desenvolvedora", "mecanico", "eletricista",
+}
+
+
+def _area_cargo(cargo: str) -> set[str]:
+    """Extrai palavras de área do cargo (remove título de nível e stopwords)."""
+    palavras = set(_org_normalizar(cargo).split())
+    return palavras - _AREA_STOPWORDS
+
+
+def _palavras_depto(depto: str) -> set[str]:
+    """Extrai palavras relevantes do departamento."""
+    stopwords = {"de", "da", "do", "das", "dos", "e", "a", "o", "e"}
+    return {w for w in _org_normalizar(depto).split() if w not in stopwords and len(w) > 1}
+
+
+def _score_compatibilidade(pai: dict, filho: dict) -> int:
+    """
+    Pontua o quão compatível é um candidato a pai para este filho.
+    Leva em conta:
+      - Mesmo departamento exato (+10)
+      - Palavras do departamento em comum (+4 por palavra)
+      - Palavras da área do cargo em comum (+5 por palavra)
+      - Área do pai contida na área do filho ou vice-versa (+8)
+    """
+    score = 0
+
+    dp = _org_normalizar(pai.get("departamento") or "")
+    df = _org_normalizar(filho.get("departamento") or "")
+    if dp and df:
+        if dp == df:
+            score += 10
+        else:
+            score += len(_palavras_depto(dp) & _palavras_depto(df)) * 4
+
+    ap = _area_cargo(pai.get("cargo") or "")
+    af = _area_cargo(filho.get("cargo") or "")
+    if ap and af:
+        score += len(ap & af) * 5
+        # Containment: área do pai está toda dentro da área do filho ou vice-versa
+        ap_str = " ".join(sorted(ap))
+        af_str = " ".join(sorted(af))
+        if ap_str and af_str and (ap_str in af_str or af_str in ap_str):
+            score += 8
+
+    return score
+
 
 def gerar_organograma_data(colaboradores: list[dict]) -> list[dict]:
     """
-    Gera lista plana de nós para renderização do organograma com d3.stratify().
+    Gera lista plana de nós {id, parentId, name, cargo, departamento, tipo, nivel}
+    para renderização do organograma com d3.stratify().
 
-    Cada nó: {id, parentId, name, cargo, departamento, tipo}
-
-    Regras:
-    - Nome normalizado (upper/strip) para casar campo "gestor" com outro colaborador.
-    - Auto-referência (gestor == próprio nome) tratada como raiz.
-    - Se há múltiplas raízes, insere nó virtual "ALISEO SA" para unificar a árvore.
+    Algoritmo (baseado em análise semântica dos cargos):
+    1. Cada cargo recebe um nível hierárquico por palavras-chave
+       (Superintendente=1, Gerente=3, Coordenador=4, Supervisor=5, etc.).
+    2. Ordena do topo para a base; atribui IDs sequenciais.
+    3. Para cada colaborador, busca o melhor "pai":
+       - Candidatos: todos com nível imediatamente superior (nível numérico menor).
+       - Pontuação: similaridade de departamento + área do cargo.
+       - Escolhe o candidato de maior pontuação.
+    4. Múltiplas raízes → nó virtual 'ALISEO SA' unifica a árvore.
     """
-    # Mapeia nome normalizado → id do nó (primeira ocorrência)
-    por_nome: dict[str, str] = {}
-    for i, c in enumerate(colaboradores):
-        nome_up = (c.get("nome") or "").upper().strip()
-        if nome_up and nome_up not in por_nome:
-            por_nome[nome_up] = str(i + 1)
+    if not colaboradores:
+        return []
 
-    nodes: list[dict] = []
-    for i, c in enumerate(colaboradores):
-        node_id   = str(i + 1)
-        gestor_up = (c.get("gestor") or "").upper().strip()
-        parent_id = por_nome.get(gestor_up, "")
-        if parent_id == node_id:   # auto-referência → vira raiz
-            parent_id = ""
+    # Enriquece com nível
+    enriched = [
+        {**c, "_nivel": _nivel_cargo(c.get("cargo", ""))}
+        for c in colaboradores
+    ]
 
-        nodes.append({
-            "id":           node_id,
-            "parentId":     parent_id,
+    # Ordena topo → base, depois por nome dentro de cada nível
+    enriched.sort(key=lambda x: (x["_nivel"], _org_normalizar(x.get("nome", ""))))
+
+    # Atribui IDs após ordenação
+    for i, c in enumerate(enriched):
+        c["_id"] = str(i + 1)
+
+    # Encontra o melhor pai para cada colaborador
+    for c in enriched:
+        nivel = c["_nivel"]
+        superiores = [x for x in enriched if x["_nivel"] < nivel]
+        if not superiores:
+            c["_parent"] = ""
+            continue
+        # Nível mais próximo acima (pode pular níveis se não existir)
+        nivel_alvo = max(x["_nivel"] for x in superiores)
+        candidatos = [x for x in superiores if x["_nivel"] == nivel_alvo]
+        melhor = max(candidatos, key=lambda cand: _score_compatibilidade(cand, c))
+        c["_parent"] = melhor["_id"]
+
+    # Monta lista de nós
+    nodes: list[dict] = [
+        {
+            "id":           c["_id"],
+            "parentId":     c["_parent"],
             "name":         c.get("nome", ""),
             "cargo":        c.get("cargo", ""),
             "departamento": c.get("departamento", ""),
             "tipo":         c.get("tipo", ""),
-        })
+            "nivel":        c["_nivel"],
+        }
+        for c in enriched
+    ]
 
-    # Se múltiplas raízes, cria nó virtual para unificar a árvore
+    # Múltiplas raízes → nó virtual unificador
     raizes = [n for n in nodes if not n["parentId"]]
     if len(raizes) > 1:
         nodes.insert(0, {
             "id": "0", "parentId": "",
             "name": "ALISEO SA", "cargo": "Conselho de Administração",
-            "departamento": "", "tipo": "",
+            "departamento": "", "tipo": "", "nivel": -1,
         })
         for n in nodes:
             if n["id"] != "0" and not n["parentId"]:

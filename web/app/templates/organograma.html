@@ -28,8 +28,7 @@
       &nbsp;·&nbsp;
       <i class="bi bi-file-earmark-excel me-1"></i>{{ meta.arquivo or 'snapshot' }}
       {% if meta.usuario %}
-      &nbsp;·&nbsp;
-      <i class="bi bi-person me-1"></i>{{ meta.usuario }}
+        &nbsp;·&nbsp;<i class="bi bi-person me-1"></i>{{ meta.usuario }}
       {% endif %}
     </p>
   </div>
@@ -38,67 +37,64 @@
   <div class="d-flex gap-2 flex-wrap align-items-start">
     <div class="btn-group btn-group-sm">
       <button class="btn btn-outline-secondary" onclick="expandirTudo()" title="Expandir todos os nós">
-        <i class="bi bi-arrows-expand me-1"></i><span class="d-none d-sm-inline">Expandir</span>
+        <i class="bi bi-arrows-expand me-1"></i><span class="d-none d-sm-inline">Expandir tudo</span>
       </button>
-      <button class="btn btn-outline-secondary" onclick="recolherTudo()" title="Recolher tudo (exceto raiz)">
+      <button class="btn btn-outline-secondary" onclick="recolherTudo()" title="Recolher ao nível gerencial">
         <i class="bi bi-arrows-collapse me-1"></i><span class="d-none d-sm-inline">Recolher</span>
       </button>
-      <button class="btn btn-outline-primary" onclick="ajustarTela()" title="Ajustar zoom à tela">
+      <button class="btn btn-outline-primary" onclick="ajustarTela()" title="Centralizar e ajustar zoom">
         <i class="bi bi-fullscreen me-1"></i><span class="d-none d-sm-inline">Ajustar</span>
       </button>
     </div>
   </div>
 </div>
 
-<!-- Legenda -->
+<!-- Legenda de níveis hierárquicos -->
 <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
-  <small class="text-muted me-1">Nível:</small>
-  <span class="badge rounded-pill px-3" style="background:#1e3a5f">1</span>
-  <span class="badge rounded-pill px-3" style="background:#1a6095">2</span>
-  <span class="badge rounded-pill px-3" style="background:#1e7fc0">3</span>
-  <span class="badge rounded-pill px-3" style="background:#2e9dd4">4</span>
-  <span class="badge rounded-pill px-3" style="background:#5ab3e4">5+</span>
-  <span class="vr mx-2"></span>
+  <small class="text-muted me-1">Hierarquia:</small>
+  <span class="badge rounded-pill px-2" style="background:#1e3a5f;font-size:.78rem">Superintendência</span>
+  <span class="badge rounded-pill px-2" style="background:#1a6095;font-size:.78rem">Diretoria</span>
+  <span class="badge rounded-pill px-2" style="background:#1e7fc0;font-size:.78rem">Gerência</span>
+  <span class="badge rounded-pill px-2" style="background:#2e9dd4;font-size:.78rem">Coordenação</span>
+  <span class="badge rounded-pill px-2" style="background:#5ab3e4;font-size:.78rem">Supervisão</span>
+  <span class="badge rounded-pill px-2" style="background:#80c8ef;color:#333;font-size:.78rem">Analistas/Técnicos</span>
+  <span class="vr mx-1"></span>
   <small class="text-muted">
-    <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#198754;vertical-align:middle"></span>
-    Expandido
+    <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#198754;vertical-align:middle"></span> expandido &nbsp;
+    <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#dc3545;vertical-align:middle"></span> recolhido
   </small>
-  <small class="text-muted">
-    <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#dc3545;vertical-align:middle"></span>
-    Recolhido
-  </small>
-  <small class="text-muted ms-1">
-    <i class="bi bi-mouse2 me-1"></i>Scroll = zoom · Arrastar = mover · Clique no nó = expandir
-  </small>
+  <small class="text-muted">· <i class="bi bi-mouse2"></i> scroll/arrastar · clique p/ expandir</small>
 </div>
 
-<!-- Container do organograma -->
+<!-- Organograma -->
 <div class="card shadow-sm border-0">
   <div id="org-container"
-       style="height: calc(100vh - 295px); min-height: 440px; overflow: hidden;
+       style="height: calc(100vh - 300px); min-height: 430px; overflow: hidden;
               position: relative; border-radius: .375rem .375rem 0 0;">
     <svg id="org-svg" width="100%" height="100%"></svg>
   </div>
   <div class="card-footer bg-body py-2 px-3 text-muted small d-flex justify-content-between align-items-center flex-wrap gap-1">
     <span>
       <i class="bi bi-info-circle me-1"></i>
-      Hierarquia baseada no campo "Gestor" da planilha.
-      Colaboradores sem gestor identificado são exibidos como raízes.
+      Hierarquia derivada automaticamente das palavras-chave dos cargos.
+      Visão inicial: até Coordenação/Supervisão. Clique para detalhar.
     </span>
     <span id="org-status" class="fw-semibold text-body"></span>
   </div>
 </div>
 
-<!-- Tooltip de detalhes do nó -->
-<div id="org-tooltip"
-     class="card shadow border-0"
+<!-- Tooltip flutuante -->
+<div id="org-tooltip" class="card shadow border-0"
      style="position:fixed;z-index:9999;pointer-events:none;display:none;
-            min-width:220px;max-width:270px;font-size:.82rem">
+            min-width:230px;max-width:280px;font-size:.82rem">
   <div class="card-body py-2 px-3">
     <p class="fw-bold mb-1" id="tt-nome" style="font-size:.9rem"></p>
     <p class="text-muted mb-1" id="tt-cargo"></p>
     <p class="text-muted mb-1" id="tt-depto"></p>
-    <div class="mb-1" id="tt-tipo"></div>
+    <div class="d-flex gap-2 align-items-center mb-1">
+      <div id="tt-tipo"></div>
+      <small class="text-muted" id="tt-nivel-label"></small>
+    </div>
     <p class="text-muted small mb-0" id="tt-sub"></p>
   </div>
 </div>
@@ -110,28 +106,45 @@
 <script>
 // ──────────────────────────────────────────────────────────────────────────────
 //  Organograma — Indicadores RH  ·  D3.js v7 + collapsible tree
+//  Hierarquia derivada de análise semântica dos cargos (Python back-end)
 // ──────────────────────────────────────────────────────────────────────────────
 
-const FLAT_DATA  = {{ arvore | tojson | safe }};
-const TOTAL_NOS  = FLAT_DATA.length;
+const FLAT_DATA = {{ arvore | tojson | safe }};
+const TOTAL_NOS = FLAT_DATA.length;
 
-// ── Dimensões ─────────────────────────────────────────────────────────────────
-const NW     = 204;   // largura do nó
-const NH     = 66;    // altura do nó
+// ── Rótulos dos níveis hierárquicos ──────────────────────────────────────────
+const NIVEL_LABEL = {
+  '-1': 'Organização',
+   '0': 'Conselho',
+   '1': 'Superintendência',
+   '2': 'Diretoria',
+   '3': 'Gerência',
+   '4': 'Coordenação',
+   '5': 'Supervisão / Liderança',
+   '6': 'Analista / Especialista',
+   '7': 'Técnico(a)',
+   '8': 'Assistente / Auxiliar / Operacional',
+   '9': 'Estagiário(a) / Aprendiz',
+};
+
+// ── Dimensões dos nós ─────────────────────────────────────────────────────────
+const NW     = 204;   // largura
+const NH     = 66;    // altura total
 const NH_HDR = 24;    // altura do cabeçalho colorido
 const HGAP   = 20;    // gap horizontal entre nós
 const VGAP   = 52;    // gap vertical entre níveis
-const RADIUS = 7;     // raio dos cantos arredondados
+const RADIUS = 7;     // raio dos cantos
 
-// ── Paleta de cores por profundidade ──────────────────────────────────────────
+// ── Paleta de cores por profundidade ─────────────────────────────────────────
+// (usa d.depth para consistência visual, independente do nível semântico)
 const CORES = ['#1e3a5f','#1a6095','#1e7fc0','#2e9dd4','#5ab3e4','#80c8ef','#a0d8f8'];
 const corD  = d => CORES[Math.min(d.depth, CORES.length - 1)];
 
-// ── Setup SVG ────────────────────────────────────────────────────────────────
-const contEl = document.getElementById('org-container');
-const svgSel = d3.select('#org-svg');
-const gRoot  = svgSel.append('g').attr('class','org-root');
-const svgDefs = svgSel.append('defs');  // clipPaths ficam aqui
+// ── Setup SVG ─────────────────────────────────────────────────────────────────
+const contEl  = document.getElementById('org-container');
+const svgSel  = d3.select('#org-svg');
+const gRoot   = svgSel.append('g').attr('class','org-root');
+const svgDefs = svgSel.append('defs');
 
 // Zoom e pan
 const zoomBeh = d3.zoom()
@@ -144,13 +157,16 @@ const tooltipEl = document.getElementById('org-tooltip');
 
 function mostrarTooltip(event, d) {
   const data = d.data;
-  document.getElementById('tt-nome').textContent  = data.name        || '—';
-  document.getElementById('tt-cargo').textContent = data.cargo       || '—';
-  document.getElementById('tt-depto').textContent = data.departamento|| '';
+  document.getElementById('tt-nome').textContent  = data.name         || '—';
+  document.getElementById('tt-cargo').textContent = data.cargo        || '—';
+  document.getElementById('tt-depto').textContent = data.departamento || '';
   document.getElementById('tt-tipo').innerHTML    = data.tipo
     ? `<span class="badge ${data.tipo==='CLT'?'bg-primary':'bg-info text-dark'}">${data.tipo}</span>`
     : '';
-  const nd = (d.children?.length||0) + (d._children?.length||0);
+  const nivelStr = String(data.nivel ?? '');
+  document.getElementById('tt-nivel-label').textContent =
+    NIVEL_LABEL[nivelStr] ? `· ${NIVEL_LABEL[nivelStr]}` : '';
+  const nd = (d.children?.length || 0) + (d._children?.length || 0);
   document.getElementById('tt-sub').textContent =
     nd > 0 ? `${nd} subordinado(s) direto(s)` : 'Sem subordinados diretos';
   tooltipEl.style.display = 'block';
@@ -158,56 +174,53 @@ function mostrarTooltip(event, d) {
 }
 
 function moverTooltip(event) {
-  const bx = tooltipEl.offsetWidth  || 260;
-  const by = tooltipEl.offsetHeight || 130;
+  const bw = tooltipEl.offsetWidth  || 270;
+  const bh = tooltipEl.offsetHeight || 140;
   const x  = event.clientX + 14;
   const y  = event.clientY - 14;
-  tooltipEl.style.left = (x + bx > window.innerWidth  ? x - bx - 14 : x) + 'px';
-  tooltipEl.style.top  = (y + by > window.innerHeight ? y - by + 14 : y) + 'px';
+  tooltipEl.style.left = (x + bw > window.innerWidth  ? x - bw - 14 : x) + 'px';
+  tooltipEl.style.top  = (y + bh > window.innerHeight ? y - bh + 14 : y) + 'px';
 }
 
-function esconderTooltip() {
-  tooltipEl.style.display = 'none';
-}
+function esconderTooltip() { tooltipEl.style.display = 'none'; }
 
-// ── Constrói hierarquia com d3.stratify ───────────────────────────────────────
+// ── Constrói hierarquia ───────────────────────────────────────────────────────
 let root;
 try {
-  root = d3.stratify()
-    .id(d => d.id)
-    .parentId(d => d.parentId)(FLAT_DATA);
+  root = d3.stratify().id(d => d.id).parentId(d => d.parentId)(FLAT_DATA);
 } catch (err) {
   console.error('Erro ao construir hierarquia:', err);
   document.getElementById('org-status').innerHTML =
-    `<span class="text-danger"><i class="bi bi-exclamation-triangle me-1"></i>` +
-    `Erro na hierarquia: ${err.message}</span>`;
+    `<span class="text-danger"><i class="bi bi-exclamation-triangle me-1"></i>${err.message}</span>`;
 }
 
-// Posição inicial (para animações)
-root.x0 = 0;
-root.y0 = 0;
+if (root) {
+  root.x0 = 0;
+  root.y0 = 0;
 
-// Atribui uid único e colapsa nós a partir do nível 2
-let _uid = 0;
-root.descendants().forEach(d => {
-  d._uid = ++_uid;
-  if (d.depth >= 2 && d.children) {
-    d._children = d.children;
-    d.children  = null;
-  }
-});
+  let _uid = 0;
+  root.descendants().forEach(d => {
+    d._uid = ++_uid;
+    // Colapsa nós de nivel >= 5 (Analistas, Técnicos, Assistentes...)
+    // OU profundidade >= 4 — mantém visão gerencial no carregamento inicial
+    const nivel = d.data.nivel ?? 99;
+    if (d.children && (nivel >= 5 || d.depth >= 4)) {
+      d._children = d.children;
+      d.children  = null;
+    }
+  });
+}
 
 // ── Função principal de renderização ─────────────────────────────────────────
 function update(source) {
-  const T = 280;  // duração da transição (ms)
+  if (!root) return;
+  const T = 280;
 
-  // Recalcula layout
   d3.tree().nodeSize([NW + HGAP, NH + VGAP])(root);
-
   const nodes = root.descendants();
   const links = root.links();
 
-  // ── Links (curvas Bézier verticais) ───────────────────────────────────────
+  // ── Links ─────────────────────────────────────────────────────────────────
   const bezier = d3.linkVertical().x(d => d.x).y(d => d.y);
 
   const lSel = gRoot.selectAll('path.org-link')
@@ -228,15 +241,14 @@ function update(source) {
     .attr('d', () => {
       const o = { x: source.x, y: source.y + NH / 2 };
       return bezier({ source: o, target: o });
-    })
-    .remove();
+    }).remove();
 
   // ── Nós ───────────────────────────────────────────────────────────────────
   const nSel = gRoot.selectAll('g.org-ng')
     .data(nodes, d => d._uid);
 
-  // ── ENTER ──────────────────────────────────────────────────────────────────
-  const enter = nSel.enter().append('g').attr('class', 'org-ng')
+  // ENTER
+  const enter = nSel.enter().append('g').attr('class','org-ng')
     .attr('transform', () => `translate(${source.x0 ?? 0},${source.y0 ?? 0})`)
     .style('cursor', d => (d.children || d._children) ? 'pointer' : 'default')
     .on('click', (ev, d) => {
@@ -249,69 +261,66 @@ function update(source) {
     .on('mousemove',  moverTooltip)
     .on('mouseleave', esconderTooltip);
 
-  // Registra clipPath para cada nó novo
-  enter.each(function (d) {
+  // ClipPath por nó (para cantos arredondados do conteúdo)
+  enter.each(function(d) {
     svgDefs.append('clipPath').attr('id', `oc${d._uid}`)
       .append('rect')
-      .attr('x', -NW / 2).attr('y', -NH / 2)
+      .attr('x', -NW/2).attr('y', -NH/2)
       .attr('width', NW).attr('height', NH)
       .attr('rx', RADIUS).attr('ry', RADIUS);
   });
 
-  // Grupo interno (com clip para arredondar cantos do conteúdo)
+  // Grupo clipado (cabeçalho + corpo + textos)
   const inner = enter.append('g')
     .attr('clip-path', d => `url(#oc${d._uid})`);
 
-  // Fundo do cabeçalho (cor por nível)
+  // Cabeçalho colorido
   inner.append('rect').attr('class','org-hdr-rect')
-    .attr('x', -NW / 2).attr('y', -NH / 2)
+    .attr('x', -NW/2).attr('y', -NH/2)
     .attr('width', NW).attr('height', NH_HDR)
     .attr('fill', d => corD(d));
 
-  // Fundo do corpo (claro/escuro via CSS)
+  // Corpo (claro/escuro via CSS)
   inner.append('rect').attr('class','org-body-bg')
-    .attr('x', -NW / 2).attr('y', -NH / 2 + NH_HDR)
+    .attr('x', -NW/2).attr('y', -NH/2 + NH_HDR)
     .attr('width', NW).attr('height', NH - NH_HDR);
 
-  // Texto do cargo (dentro do cabeçalho)
+  // Texto do cargo (cabeçalho)
   inner.append('text').attr('class','org-cargo-txt')
-    .attr('x', -NW / 2 + 9)
-    .attr('y', -NH / 2 + NH_HDR / 2)
+    .attr('x', -NW/2 + 9)
+    .attr('y', -NH/2 + NH_HDR/2)
     .attr('dy', '0.35em')
     .text(d => truncar(d.data.cargo, 28));
 
-  // Texto do nome (dentro do corpo)
+  // Texto do nome (corpo)
   inner.append('text').attr('class','org-nome-txt')
-    .attr('x', -NW / 2 + 9)
-    .attr('y', -NH / 2 + NH_HDR + (NH - NH_HDR) / 2)
+    .attr('x', -NW/2 + 9)
+    .attr('y', -NH/2 + NH_HDR + (NH - NH_HDR) / 2)
     .attr('dy', '0.35em')
     .text(d => truncar(d.data.name, 26));
 
-  // Borda arredondada externa (sobre o clip — dá o visual de border)
+  // Borda arredondada (sobre o clip)
   enter.append('rect').attr('class','org-border')
-    .attr('x', -NW / 2).attr('y', -NH / 2)
+    .attr('x', -NW/2).attr('y', -NH/2)
     .attr('width', NW).attr('height', NH)
     .attr('rx', RADIUS).attr('ry', RADIUS)
     .attr('fill', 'none')
     .attr('stroke-width', 1.5)
     .attr('stroke', d => corD(d));
 
-  // Ponto indicador de colapso (abaixo do nó)
+  // Ponto indicador de colapso
   enter.append('circle').attr('class','org-dot')
-    .attr('cy', NH / 2 + 5).attr('r', 5)
-    .attr('stroke-width', 1.5);
+    .attr('cy', NH/2 + 5).attr('r', 5).attr('stroke-width', 1.5);
 
-  // ── UPDATE (anima posição + atualiza dot) ────────────────────────────────
+  // UPDATE — posição + dot
   const all = nSel.merge(enter);
-
   all.transition().duration(T)
     .attr('transform', d => `translate(${d.x},${d.y})`);
-
   all.select('.org-dot')
     .attr('fill',   d => d._children ? '#dc3545' : (d.children ? '#198754' : 'transparent'))
     .attr('stroke', d => (d._children || d.children) ? 'white' : 'none');
 
-  // ── EXIT ─────────────────────────────────────────────────────────────────
+  // EXIT
   nSel.exit()
     .each(d => svgDefs.select(`#oc${d._uid}`).remove())
     .transition().duration(T)
@@ -319,24 +328,23 @@ function update(source) {
     .style('opacity', 0)
     .remove();
 
-  // Salva posição para próxima animação
+  // Posição anterior para próxima animação
   nodes.forEach(d => { d.x0 = d.x; d.y0 = d.y; });
 
-  // Atualiza contador
+  // Contador
   document.getElementById('org-status').textContent =
     `${nodes.length} de ${TOTAL_NOS} nós visíveis`;
 }
 
-// ── Controles de zoom / colapso ──────────────────────────────────────────────
-
+// ── Controles ─────────────────────────────────────────────────────────────────
 function ajustarTela() {
   const b = gRoot.node().getBBox();
   if (!b.width || !b.height) return;
-  const W = contEl.offsetWidth;
-  const H = contEl.offsetHeight;
+  const W  = contEl.offsetWidth;
+  const H  = contEl.offsetHeight;
   const sc = Math.min((W - 60) / b.width, (H - 60) / b.height, 1.5) * 0.92;
   const tx = W / 2 - sc * (b.x + b.width  / 2);
-  const ty = 36    - sc * b.y;
+  const ty = 40    - sc * b.y;
   svgSel.transition().duration(600)
     .call(zoomBeh.transform, d3.zoomIdentity.translate(tx, ty).scale(sc));
 }
@@ -351,7 +359,11 @@ function expandirTudo() {
 
 function recolherTudo() {
   root.descendants().forEach(d => {
-    if (d.depth > 0 && d.children) { d._children = d.children; d.children = null; }
+    const nivel = d.data.nivel ?? 99;
+    if (d.depth > 0 && d.children && (nivel >= 5 || d.depth >= 4)) {
+      d._children = d.children;
+      d.children  = null;
+    }
   });
   update(root);
   setTimeout(ajustarTela, 360);
@@ -363,42 +375,31 @@ function truncar(str, max) {
   return str.length > max ? str.slice(0, max - 1) + '…' : str;
 }
 
-// ── Render inicial ────────────────────────────────────────────────────────────
+// ── Inicialização ─────────────────────────────────────────────────────────────
 if (root) {
   update(root);
   setTimeout(ajustarTela, 120);
 }
 
-// Reajusta ao redimensionar janela
-let _resizeTimer;
+let _rsTimer;
 window.addEventListener('resize', () => {
-  clearTimeout(_resizeTimer);
-  _resizeTimer = setTimeout(ajustarTela, 220);
+  clearTimeout(_rsTimer);
+  _rsTimer = setTimeout(ajustarTela, 220);
 });
 </script>
 
 <style>
 /* ── Estilos do Organograma ────────────────────────────────────────────────── */
-
-/* Links (linhas entre nós) */
 .org-link {
   fill: none;
   stroke: #adb5bd;
   stroke-width: 1.5px;
 }
-[data-bs-theme="dark"] .org-link {
-  stroke: #495057;
-}
+[data-bs-theme="dark"] .org-link { stroke: #495057; }
 
-/* Fundo do corpo do nó (light / dark mode) */
-.org-body-bg {
-  fill: #ffffff;
-}
-[data-bs-theme="dark"] .org-body-bg {
-  fill: #1e2535;
-}
+.org-body-bg  { fill: #ffffff; }
+[data-bs-theme="dark"] .org-body-bg { fill: #1e2535; }
 
-/* Texto do cargo (no cabeçalho colorido) */
 .org-cargo-txt {
   fill: #ffffffdd;
   font-size: 10px;
@@ -406,8 +407,6 @@ window.addEventListener('resize', () => {
   font-family: inherit;
   pointer-events: none;
 }
-
-/* Texto do nome (no corpo) */
 .org-nome-txt {
   fill: #212529;
   font-size: 12px;
@@ -415,19 +414,12 @@ window.addEventListener('resize', () => {
   font-family: inherit;
   pointer-events: none;
 }
-[data-bs-theme="dark"] .org-nome-txt {
-  fill: #e0e6f0;
-}
+[data-bs-theme="dark"] .org-nome-txt { fill: #e0e6f0; }
 
-/* Hover: leve destaque no nó */
 .org-ng:hover .org-border {
   stroke-width: 2.5 !important;
-  filter: drop-shadow(0 2px 6px rgba(0,0,0,.25));
+  filter: drop-shadow(0 2px 8px rgba(0,0,0,.28));
 }
-
-/* Dot indicador colapso */
-.org-dot {
-  transition: fill .2s;
-}
+.org-dot { transition: fill .2s; }
 </style>
 {% endblock %}
