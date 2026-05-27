@@ -54,12 +54,35 @@
             title="Log de alterações e restauração">
       <i class="bi bi-clock-history me-1"></i>Histórico
     </button>
-    <button class="btn btn-sm btn-outline-success" onclick="exportarPDF()" title="Exportar / Imprimir PDF">
-      <i class="bi bi-file-earmark-pdf me-1"></i>PDF
-    </button>
-    <button class="btn btn-sm btn-outline-secondary" onclick="exportarSVG()" title="Baixar SVG">
-      <i class="bi bi-download me-1"></i>SVG
-    </button>
+    <div class="dropdown">
+      <button class="btn btn-sm btn-outline-success dropdown-toggle"
+              data-bs-toggle="dropdown" aria-expanded="false"
+              title="Exportar PDF A3">
+        <i class="bi bi-file-earmark-pdf me-1"></i>PDF
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end shadow">
+        <li>
+          <button class="dropdown-item py-2" onclick="exportarPDFA3('completo')">
+            <i class="bi bi-file-earmark-pdf text-primary me-2"></i>
+            <strong>A3 — Completo</strong>
+            <small class="text-muted d-block ms-4 mt-0">Todo o organograma em uma página A3</small>
+          </button>
+        </li>
+        <li>
+          <button class="dropdown-item py-2" onclick="exportarPDFA3('setores')">
+            <i class="bi bi-files text-success me-2"></i>
+            <strong>A3 — Por setor</strong>
+            <small class="text-muted d-block ms-4 mt-0">Visão geral + uma página A3 por divisão</small>
+          </button>
+        </li>
+        <li><hr class="dropdown-divider"></li>
+        <li>
+          <button class="dropdown-item" onclick="exportarSVG()">
+            <i class="bi bi-download text-secondary me-2"></i>Baixar SVG vetorial
+          </button>
+        </li>
+      </ul>
+    </div>
   </div>
 </div>
 
@@ -253,6 +276,15 @@
       </div>
     </div>
   </div>
+</div>
+
+<!-- ─── Overlay de geração de PDF ────────────────────────────────────────────── -->
+<div id="pdf-loading"
+     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);
+            z-index:10000;flex-direction:column;align-items:center;justify-content:center;">
+  <div class="spinner-border text-light mb-3" style="width:3rem;height:3rem;"></div>
+  <p id="pdf-loading-msg" class="text-white fw-semibold fs-5 mb-1">Gerando PDF…</p>
+  <p class="text-white-50 small">Isso pode levar alguns segundos conforme o tamanho do organograma.</p>
 </div>
 
 <!-- ─── Modal Histórico de alterações ───────────────────────────────────────── -->
@@ -687,37 +719,240 @@ document.addEventListener('fullscreenchange', () => {
   setTimeout(ajustarTela, 200);
 });
 
-// ── Exportar PDF (via print) ──────────────────────────────────────────────────
-function exportarPDF() {
-  const prevTransform = currentTransform;
-  // Expande tudo
-  root && root.descendants().forEach(d=>{
-    if(d._children){d.children=d._children;d._children=null;}
+// ══════════════════════════════════════════════════════════════════════════════
+//  Export PDF A3 via jsPDF  (download direto, sem diálogo de impressão)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Constantes A3 landscape ───────────────────────────────────────────────────
+const A3_W_MM   = 420,  A3_H_MM   = 297;
+const MAR_MM    = 8;                                    // margem
+const HDR_MM    = 15;                                   // cabeçalho
+const CONT_W_MM = A3_W_MM - MAR_MM * 2;                // 404 mm
+const CONT_H_MM = A3_H_MM - MAR_MM * 2 - HDR_MM;      // 266 mm
+const PDF_DPI   = 220;                                  // resolução do canvas
+
+// ── Carrega jsPDF dinamicamente ───────────────────────────────────────────────
+async function carregarJsPDF() {
+  if (window.jspdf?.jsPDF) return window.jspdf.jsPDF;
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+    s.onload  = () => window.jspdf?.jsPDF
+      ? resolve(window.jspdf.jsPDF)
+      : reject(new Error('jsPDF não carregou'));
+    s.onerror = () => reject(new Error('Falha ao baixar jsPDF — verifique a conexão.'));
+    document.head.appendChild(s);
   });
-  update(root);
-  setTimeout(()=>{
-    // Configura viewBox para englobar todo o conteúdo
-    const b = gRoot.node().getBBox();
-    if (!b.width||!b.height) { window.print(); return; }
-    const pad = 30;
-    const vb  = `${b.x-pad} ${b.y-pad} ${b.width+pad*2} ${b.height+pad*2}`;
-    svgSel.attr('viewBox', vb);
-    // Remove transform do grupo (o viewBox faz o posicionamento)
-    gRoot.attr('transform', null);
+}
 
-    window.print();
+function setPdfLoading(msg) {
+  const el  = document.getElementById('pdf-loading');
+  const msg2 = document.getElementById('pdf-loading-msg');
+  if (!el) return;
+  if (msg === null) { el.style.display = 'none'; return; }
+  msg2.textContent = msg;
+  el.style.display = 'flex';
+}
 
-    window.addEventListener('afterprint', ()=>{
-      svgSel.attr('viewBox', null);
-      gRoot.attr('transform', prevTransform.toString());
-      // Recolapsa
-      root && root.descendants().forEach(d=>{
-        const n=d.data.nivel??99;
-        if(d.depth>0&&d.children&&(n>=5||d.depth>=4)){d._children=d.children;d.children=null;}
+// ── Bounding box de um nó D3 e todos os seus descendentes ────────────────────
+function calcBBoxNode(node, pad = 50) {
+  const all = node.descendants();
+  if (!all.length) return { x: 0, y: 0, width: 400, height: 200 };
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  all.forEach(d => {
+    x0 = Math.min(x0, d.x - NW/2);
+    x1 = Math.max(x1, d.x + NW/2);
+    y0 = Math.min(y0, d.y - NH/2);
+    y1 = Math.max(y1, d.y + NH/2);
+  });
+  return { x: x0-pad, y: y0-pad, width: x1-x0+pad*2, height: y1-y0+pad*2 };
+}
+
+// ── Renderiza uma região do SVG para canvas ───────────────────────────────────
+async function renderBBoxToCanvas(bbox, canvasW, canvasH) {
+  const svgEl = document.getElementById('org-svg');
+  const clone = svgEl.cloneNode(true);
+
+  clone.setAttribute('width',   String(canvasW));
+  clone.setAttribute('height',  String(canvasH));
+  clone.setAttribute('viewBox', `${bbox.x} ${bbox.y} ${bbox.width} ${bbox.height}`);
+  clone.style.background = '#ffffff';
+
+  // Remove transform de zoom do grupo raiz (viewBox cobre o posicionamento)
+  const orgRootG = clone.querySelector('.org-root');
+  if (orgRootG) orgRootG.removeAttribute('transform');
+
+  // Inline de estilos críticos (sem variáveis CSS / dark-mode)
+  const styleEl = document.createElementNS('http://www.w3.org/2000/svg', 'style');
+  styleEl.textContent = `
+    .org-link       { fill:none; stroke:#adb5bd; stroke-width:1.5px }
+    .org-link-extra { fill:none; stroke:#fd7e14; stroke-width:1.8px;
+                      stroke-dasharray:6,3; opacity:.85 }
+    .org-body-bg    { fill:#ffffff }
+    .org-cargo-txt  { fill:rgba(255,255,255,.92); font-size:10px; font-weight:bold;
+                      font-family:Arial,Helvetica,sans-serif; pointer-events:none }
+    .org-nome-txt   { fill:#212529; font-size:12px; font-weight:bold;
+                      font-family:Arial,Helvetica,sans-serif; pointer-events:none }
+    .org-edit-btn   { display:none }
+    .org-dot        { display:none }
+    .org-multi-dot  { fill:#fd7e14; stroke:white; stroke-width:1.2px }
+  `;
+  clone.insertBefore(styleEl, clone.firstChild);
+
+  let svgStr = new XMLSerializer().serializeToString(clone);
+  if (!svgStr.includes('xmlns="http://www.w3.org/2000/svg"'))
+    svgStr = svgStr.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+
+  const blob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+  const url  = URL.createObjectURL(blob);
+
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const cv = document.createElement('canvas');
+      cv.width = canvasW; cv.height = canvasH;
+      const ctx = cv.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvasW, canvasH);
+      ctx.drawImage(img, 0, 0, canvasW, canvasH);
+      URL.revokeObjectURL(url);
+      resolve(cv);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('SVG render falhou')); };
+    img.src = url;
+  });
+}
+
+// ── Desenha cabeçalho colorido no topo da página PDF ─────────────────────────
+function addPdfHeader(pdf, titulo, subtitulo) {
+  const pW = pdf.internal.pageSize.getWidth();
+  const pn = pdf.internal.getCurrentPageInfo().pageNumber;
+
+  pdf.setFillColor(30, 58, 95);   // azul escuro
+  pdf.rect(0, 0, pW, HDR_MM, 'F');
+
+  pdf.setFontSize(12);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setTextColor(255, 255, 255);
+  pdf.text('ALISEO SA  ·  ' + titulo, MAR_MM, HDR_MM * 0.65);
+
+  const dt = new Date().toLocaleDateString('pt-BR');
+  pdf.setFontSize(7.5);
+  pdf.setFont('helvetica', 'normal');
+  pdf.setTextColor(185, 210, 235);
+  const right = (subtitulo ? subtitulo + '   ·   ' : '') + dt + '   ·   pág. ' + pn;
+  pdf.text(right, pW - MAR_MM, HDR_MM * 0.65, { align: 'right' });
+}
+
+// ── Adiciona uma página com o subtree de um nó ────────────────────────────────
+async function adicionarPaginaSubtree(pdf, node, titulo, subtitulo = '') {
+  const bbox = calcBBoxNode(node);
+
+  // Escala para caber em CONT_W × CONT_H preservando proporção
+  const fatorX = CONT_W_MM / bbox.width;
+  const fatorY = CONT_H_MM / bbox.height;
+  const fator  = Math.min(fatorX, fatorY);
+
+  const imgW   = bbox.width  * fator;
+  const imgH   = bbox.height * fator;
+  const imgX   = MAR_MM + (CONT_W_MM - imgW) / 2;
+  const imgY   = MAR_MM + HDR_MM + (CONT_H_MM - imgH) / 2;
+
+  // Canvas em alta resolução (PDF_DPI)
+  const cvW = Math.round(imgW / 25.4 * PDF_DPI);
+  const cvH = Math.round(imgH / 25.4 * PDF_DPI);
+
+  const canvas  = await renderBBoxToCanvas(bbox, cvW, cvH);
+  const imgData = canvas.toDataURL('image/jpeg', 0.93);
+
+  addPdfHeader(pdf, titulo, subtitulo);
+  pdf.addImage(imgData, 'JPEG', imgX, imgY, imgW, imgH, undefined, 'FAST');
+}
+
+// ── Ponto de entrada do export ────────────────────────────────────────────────
+async function exportarPDFA3(modo = 'completo') {
+  if (!root) { alert('Organograma não carregado.'); return; }
+
+  // Salva estado de colapso atual
+  const colapsados = new Set();
+  root.descendants().forEach(d => { if (d._children) colapsados.add(d._uid); });
+
+  try {
+    setPdfLoading('Carregando biblioteca PDF…');
+    const jsPDF = await carregarJsPDF();
+
+    // Expande tudo e recalcula layout (sem animar — só posições)
+    setPdfLoading('Calculando layout completo…');
+    root.descendants().forEach(d => {
+      if (d._children) { d.children = d._children; d._children = null; }
+    });
+    d3.tree().nodeSize([NW + HGAP, NH + VGAP])(root);
+
+    const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
+    const dt  = new Date().toISOString().slice(0, 10);
+    const nTotal = TOTAL_NOS - 1;  // exclui __ROOT__
+
+    if (modo === 'completo') {
+      // ─────── Uma única página A3 com tudo ────────────────────────────────
+      setPdfLoading('Renderizando organograma completo…');
+      await adicionarPaginaSubtree(
+        pdf, root,
+        'Organograma Completo',
+        `${nTotal} colaboradores`,
+      );
+
+    } else {
+      // ─────── Visão geral (níveis 0-1) + uma página por divisão ──────────
+
+      // Pág 1: apenas root + filhos diretos (colapsa o resto)
+      setPdfLoading('Renderizando visão geral (nível 1)…');
+      root.descendants().forEach(d => {
+        if (d.depth >= 1 && d.children) { d._children = d.children; d.children = null; }
       });
-      update(root); setTimeout(ajustarTela, 200);
-    }, {once:true});
-  }, 600);
+      d3.tree().nodeSize([NW + HGAP, NH + VGAP])(root);
+      await adicionarPaginaSubtree(
+        pdf, root,
+        'Visão Geral',
+        `${nTotal} colaboradores  ·  ${(root.children||[]).length} divisões`,
+      );
+
+      // Reexpande tudo para as páginas seguintes
+      root.descendants().forEach(d => {
+        if (d._children) { d.children = d._children; d._children = null; }
+      });
+      d3.tree().nodeSize([NW + HGAP, NH + VGAP])(root);
+
+      // Pág 2+: uma por filho direto da raiz
+      const branches = root.children || [];
+      for (let i = 0; i < branches.length; i++) {
+        const b   = branches[i];
+        const nSub = b.descendants().length - 1;
+        setPdfLoading(`Renderizando: ${b.data.name} (${i+1}/${branches.length})…`);
+        pdf.addPage('a3', 'landscape');
+        await adicionarPaginaSubtree(
+          pdf, b,
+          b.data.name,
+          `${b.data.cargo}  ·  ${nSub} colaboradores`,
+        );
+      }
+    }
+
+    setPdfLoading('Finalizando download…');
+    pdf.save(`organograma_aliseo_${dt}.pdf`);
+
+  } catch(err) {
+    console.error(err);
+    alert('Erro ao gerar PDF: ' + err.message);
+  } finally {
+    setPdfLoading(null);
+    // Restaura colapso original
+    root.descendants().forEach(d => {
+      if (colapsados.has(d._uid) && d.children) {
+        d._children = d.children; d.children = null;
+      }
+    });
+    update(root);
+  }
 }
 
 // ── Exportar SVG ──────────────────────────────────────────────────────────────
@@ -1147,23 +1382,15 @@ window.addEventListener('resize',()=>{ clearTimeout(_rsT); _rsT=setTimeout(ajust
   border:2px dashed #ffc107; font-size:.8em;
 }
 
-/* ── Print / PDF ─────────────────────────────────────────────────────────── */
+/* ── Print fallback (Ctrl+P) ─────────────────────────────────────────────── */
 @media print {
   body * { visibility: hidden !important; }
-  #org-print-wrapper,
-  #org-print-wrapper * { visibility: visible !important; }
-  #org-print-wrapper {
-    position: fixed !important;
-    top: 0 !important; left: 0 !important;
-    width: 100vw !important; height: 100vh !important;
-    z-index: 9999 !important;
-  }
-  #org-container {
-    height: 100vh !important;
-    border-radius: 0 !important;
-    overflow: visible !important;
-  }
-  .card-footer, .card { border: none !important; }
+  #org-print-wrapper, #org-print-wrapper * { visibility: visible !important; }
+  #org-print-wrapper { position:fixed; inset:0; width:100vw; height:100vh; z-index:9999; }
+  #org-container { height:100vh !important; border-radius:0 !important; overflow:visible !important; }
+  .card-footer, .card { border:none !important; }
+  /* A3 landscape */
+  @page { size: A3 landscape; margin: 8mm; }
 }
 </style>
 {% endblock %}
