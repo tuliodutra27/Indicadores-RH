@@ -60,29 +60,29 @@
               title="Exportar">
         <i class="bi bi-file-earmark-arrow-down me-1"></i>Exportar
       </button>
-      <ul class="dropdown-menu dropdown-menu-end shadow" style="min-width:260px">
-        <li><h6 class="dropdown-header">PDF A3 Landscape — exporta o que está visível</h6></li>
+      <ul class="dropdown-menu dropdown-menu-end shadow" style="min-width:280px">
+        <li><h6 class="dropdown-header">PDF — visualização digital (zoom)</h6></li>
         <li>
           <button class="dropdown-item py-2" onclick="exportarPDFA3('atual')">
             <i class="bi bi-file-earmark-pdf text-primary me-2"></i>
-            <strong>A3 — Como está na tela</strong>
-            <small class="text-muted d-block ms-4">Todos os níveis atualmente expandidos</small>
+            <strong>PDF — Página única</strong>
+            <small class="text-muted d-block ms-4">Tamanho sob medida · abra e dê zoom para ler</small>
           </button>
         </li>
         <li>
           <button class="dropdown-item py-2" onclick="exportarPDFA3('setores')">
             <i class="bi bi-files text-success me-2"></i>
-            <strong>A3 — Por setor</strong>
-            <small class="text-muted d-block ms-4">Uma página A3 por divisão principal</small>
+            <strong>PDF A3 — Por setor</strong>
+            <small class="text-muted d-block ms-4">Multipáginas A3, uma por divisão principal</small>
           </button>
         </li>
         <li><hr class="dropdown-divider"></li>
-        <li><h6 class="dropdown-header">SVG vetorial — ideal para compartilhar digitalmente</h6></li>
+        <li><h6 class="dropdown-header">SVG vetorial — 100% nítido em qualquer zoom</h6></li>
         <li>
           <button class="dropdown-item py-2" onclick="exportarSVG()">
             <i class="bi bi-vector-pen text-secondary me-2"></i>
             <strong>SVG — Como está na tela</strong>
-            <small class="text-muted d-block ms-4">Zoomável, nítido em qualquer resolução</small>
+            <small class="text-muted d-block ms-4">Apenas os níveis expandidos</small>
           </button>
         </li>
         <li>
@@ -741,9 +741,9 @@ const HDR_MM     = 15;
 const CONT_W_MM  = A3_W_MM - MAR_MM * 2;            // 404 mm
 const CONT_H_MM  = A3_H_MM - MAR_MM * 2 - HDR_MM;  // 266 mm
 const PDF_DPI    = 220;
-const MAX_CV_DIM   = 6000;   // cap de canvas — evita falha de alocação de memória
-const MIN_SCALE_MM = 0.22;   // mm por unidade SVG — escala mínima para texto legível
-                              // NH=66 → 14.5mm por nó; font 12 → 2.6mm (~7.5pt)
+const MAX_CV_DIM   = 8192;   // cap de canvas (2^13) — seguro em todos os browsers modernos
+const MIN_SCALE_MM = 0.25;   // mm por unidade SVG — escala mínima para texto legível
+                              // NH=66 → 16.5mm por nó; font 12 → 3mm (~8.5pt)
 
 // ── Carrega jsPDF dinamicamente ───────────────────────────────────────────────
 async function carregarJsPDF() {
@@ -900,6 +900,26 @@ async function adicionarPaginaComBBox(pdf, bbox, titulo, subtitulo = '') {
   pdf.addImage(imgData, 'JPEG', iX, iY, iW, iH, undefined, 'FAST');
 }
 
+// ── Adiciona página com escala fixa (página de tamanho personalizado) ─────────
+async function adicionarPaginaComEscala(pdf, bbox, escala, titulo, subtitulo = '') {
+  const iW = bbox.width  * escala;   // largura da imagem em mm
+  const iH = bbox.height * escala;   // altura  da imagem em mm
+  const iX = MAR_MM;
+  const iY = MAR_MM + HDR_MM;
+
+  let cvW = Math.round(iW / 25.4 * PDF_DPI);
+  let cvH = Math.round(iH / 25.4 * PDF_DPI);
+  if (Math.max(cvW, cvH) > MAX_CV_DIM) {
+    const s = MAX_CV_DIM / Math.max(cvW, cvH);
+    cvW = Math.round(cvW * s); cvH = Math.round(cvH * s);
+  }
+
+  const canvas  = await renderBBoxToCanvas(bbox, cvW, cvH);
+  const imgData = canvas.toDataURL('image/jpeg', 0.93);
+  addPdfHeader(pdf, titulo, subtitulo);
+  pdf.addImage(imgData, 'JPEG', iX, iY, iW, iH, undefined, 'FAST');
+}
+
 // ── Pagina um bbox em quantas A3 forem necessárias para manter legibilidade ──
 //    Se o bbox couber numa página com escala ≥ MIN_SCALE_MM → página única.
 //    Caso contrário divide em tiles horizontais/verticais.
@@ -951,20 +971,31 @@ async function exportarPDFA3(modo = 'atual') {
   try {
     setPdfLoading('Carregando biblioteca PDF…');
     const jsPDF  = await carregarJsPDF();
-    const pdf    = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
     const dt     = new Date().toISOString().slice(0, 10);
     const nTotal = TOTAL_NOS - 1;   // exclui __ROOT__
 
     if (modo === 'atual') {
-      // ── Exporta o que está visível; pagina automaticamente se muito largo ──
-      setPdfLoading('Calculando layout…');
+      // ── Página de tamanho personalizado — todo o conteúdo visível ─────────
+      //    Ideal para visualização digital: abrir e dar zoom para ler.
+      setPdfLoading('Calculando dimensões…');
       const bbox   = calcBBoxVisible(root, 50);
       const nVisib = root.descendants().filter(d => !d._children).length - 1;
-      await paginarBBox(pdf, bbox,
+
+      // Dimensão da página = conteúdo em escala legível + margens
+      const pgW = Math.ceil(bbox.width  * MIN_SCALE_MM) + MAR_MM * 2;
+      const pgH = Math.ceil(bbox.height * MIN_SCALE_MM) + MAR_MM * 2 + HDR_MM;
+      const pdf = new jsPDF({ unit: 'mm', format: [pgW, pgH] });
+
+      setPdfLoading('Renderizando organograma…');
+      await adicionarPaginaComEscala(pdf, bbox, MIN_SCALE_MM,
         'Organograma', `${nVisib} de ${nTotal} colaboradores visíveis`);
 
+      setPdfLoading('Finalizando download…');
+      pdf.save(`organograma_aliseo_${dt}.pdf`);
+
     } else {
-      // ── Por setor: visão geral + uma página por ramo expandido ────────────
+      // ── Por setor: A3 landscape, tiles se algum ramo for muito largo ──────
+      const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
 
       // Pág 1 — visão geral de todos os ramos juntos
       setPdfLoading('Renderizando visão geral…');
@@ -985,10 +1016,10 @@ async function exportarPDFA3(modo = 'atual') {
           b.data.name, `${b.data.cargo}  ·  ${nSub} visíveis`,
           true /* addPage antes */);
       }
-    }
 
-    setPdfLoading('Finalizando download…');
-    pdf.save(`organograma_aliseo_${dt}.pdf`);
+      setPdfLoading('Finalizando download…');
+      pdf.save(`organograma_aliseo_${dt}.pdf`);
+    }
 
   } catch(err) {
     console.error(err);
