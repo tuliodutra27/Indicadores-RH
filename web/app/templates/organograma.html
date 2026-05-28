@@ -65,8 +65,8 @@
         <li>
           <button class="dropdown-item py-2" onclick="exportarPDFA3('atual')">
             <i class="bi bi-file-earmark-pdf text-primary me-2"></i>
-            <strong>PDF — Página única</strong>
-            <small class="text-muted d-block ms-4">Tamanho sob medida · abra e dê zoom para ler</small>
+            <strong>PDF A0 Landscape</strong>
+            <small class="text-muted d-block ms-4">Página única · abra e dê zoom para ler</small>
           </button>
         </li>
         <li>
@@ -900,26 +900,6 @@ async function adicionarPaginaComBBox(pdf, bbox, titulo, subtitulo = '') {
   pdf.addImage(imgData, 'JPEG', iX, iY, iW, iH, undefined, 'FAST');
 }
 
-// ── Adiciona página com escala fixa (página de tamanho personalizado) ─────────
-async function adicionarPaginaComEscala(pdf, bbox, escala, titulo, subtitulo = '') {
-  const iW = bbox.width  * escala;   // largura da imagem em mm
-  const iH = bbox.height * escala;   // altura  da imagem em mm
-  const iX = MAR_MM;
-  const iY = MAR_MM + HDR_MM;
-
-  let cvW = Math.round(iW / 25.4 * PDF_DPI);
-  let cvH = Math.round(iH / 25.4 * PDF_DPI);
-  if (Math.max(cvW, cvH) > MAX_CV_DIM) {
-    const s = MAX_CV_DIM / Math.max(cvW, cvH);
-    cvW = Math.round(cvW * s); cvH = Math.round(cvH * s);
-  }
-
-  const canvas  = await renderBBoxToCanvas(bbox, cvW, cvH);
-  const imgData = canvas.toDataURL('image/jpeg', 0.93);
-  addPdfHeader(pdf, titulo, subtitulo);
-  pdf.addImage(imgData, 'JPEG', iX, iY, iW, iH, undefined, 'FAST');
-}
-
 // ── Pagina um bbox em quantas A3 forem necessárias para manter legibilidade ──
 //    Se o bbox couber numa página com escala ≥ MIN_SCALE_MM → página única.
 //    Caso contrário divide em tiles horizontais/verticais.
@@ -975,20 +955,37 @@ async function exportarPDFA3(modo = 'atual') {
     const nTotal = TOTAL_NOS - 1;   // exclui __ROOT__
 
     if (modo === 'atual') {
-      // ── Página de tamanho personalizado — todo o conteúdo visível ─────────
-      //    Ideal para visualização digital: abrir e dar zoom para ler.
-      setPdfLoading('Calculando dimensões…');
+      // ── A0 Landscape — página única, abra e dê zoom para ler ─────────────
+      const A0_W_MM = 1189, A0_H_MM = 841;   // A0 landscape em mm
+      const contW   = A0_W_MM - MAR_MM * 2;  // 1173 mm
+      const contH   = A0_H_MM - MAR_MM * 2 - HDR_MM; // 810 mm
+
+      setPdfLoading('Calculando layout A0…');
       const bbox   = calcBBoxVisible(root, 50);
       const nVisib = root.descendants().filter(d => !d._children).length - 1;
 
-      // Dimensão da página = conteúdo em escala legível + margens
-      const pgW = Math.ceil(bbox.width  * MIN_SCALE_MM) + MAR_MM * 2;
-      const pgH = Math.ceil(bbox.height * MIN_SCALE_MM) + MAR_MM * 2 + HDR_MM;
-      const pdf = new jsPDF({ unit: 'mm', format: [pgW, pgH] });
+      // Escala proporcional para preencher a área útil do A0
+      const f  = Math.min(contW / bbox.width, contH / bbox.height);
+      const iW = bbox.width  * f;
+      const iH = bbox.height * f;
+      const iX = MAR_MM + (contW - iW) / 2;
+      const iY = MAR_MM + HDR_MM + (contH - iH) / 2;
 
-      setPdfLoading('Renderizando organograma…');
-      await adicionarPaginaComEscala(pdf, bbox, MIN_SCALE_MM,
-        'Organograma', `${nVisib} de ${nTotal} colaboradores visíveis`);
+      // Canvas em alta resolução, com cap para evitar estouro de memória
+      let cvW = Math.round(iW / 25.4 * PDF_DPI);
+      let cvH = Math.round(iH / 25.4 * PDF_DPI);
+      if (Math.max(cvW, cvH) > MAX_CV_DIM) {
+        const s = MAX_CV_DIM / Math.max(cvW, cvH);
+        cvW = Math.round(cvW * s); cvH = Math.round(cvH * s);
+      }
+
+      const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a0' });
+
+      setPdfLoading('Renderizando em A0 landscape…');
+      const canvas  = await renderBBoxToCanvas(bbox, cvW, cvH);
+      const imgData = canvas.toDataURL('image/jpeg', 0.93);
+      addPdfHeader(pdf, 'Organograma', `${nVisib} de ${nTotal} colaboradores visíveis`);
+      pdf.addImage(imgData, 'JPEG', iX, iY, iW, iH, undefined, 'FAST');
 
       setPdfLoading('Finalizando download…');
       pdf.save(`organograma_aliseo_${dt}.pdf`);
