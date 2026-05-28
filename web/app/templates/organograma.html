@@ -741,7 +741,9 @@ const HDR_MM     = 15;
 const CONT_W_MM  = A3_W_MM - MAR_MM * 2;            // 404 mm
 const CONT_H_MM  = A3_H_MM - MAR_MM * 2 - HDR_MM;  // 266 mm
 const PDF_DPI    = 220;
-const MAX_CV_DIM = 6000;   // cap de canvas — evita falha de alocação de memória
+const MAX_CV_DIM   = 6000;   // cap de canvas — evita falha de alocação de memória
+const MIN_SCALE_MM = 0.22;   // mm por unidade SVG — escala mínima para texto legível
+                              // NH=66 → 14.5mm por nó; font 12 → 2.6mm (~7.5pt)
 
 // ── Carrega jsPDF dinamicamente ───────────────────────────────────────────────
 async function carregarJsPDF() {
@@ -898,6 +900,46 @@ async function adicionarPaginaComBBox(pdf, bbox, titulo, subtitulo = '') {
   pdf.addImage(imgData, 'JPEG', iX, iY, iW, iH, undefined, 'FAST');
 }
 
+// ── Pagina um bbox em quantas A3 forem necessárias para manter legibilidade ──
+//    Se o bbox couber numa página com escala ≥ MIN_SCALE_MM → página única.
+//    Caso contrário divide em tiles horizontais/verticais.
+async function paginarBBox(pdf, bbox, titulo, subtitulo = '', addPageAntes = false) {
+  const naturalScale = Math.min(CONT_W_MM / bbox.width, CONT_H_MM / bbox.height);
+
+  if (naturalScale >= MIN_SCALE_MM) {
+    // ── cabe numa página com boa legibilidade ──────────────────────────────
+    if (addPageAntes) pdf.addPage('a3', 'landscape');
+    await adicionarPaginaComBBox(pdf, bbox, titulo, subtitulo);
+    return;
+  }
+
+  // ── tiling: divide em páginas no tamanho mínimo legível ───────────────────
+  const tileW = CONT_W_MM / MIN_SCALE_MM;   // unidades SVG por página (largura)
+  const tileH = CONT_H_MM / MIN_SCALE_MM;   // unidades SVG por página (altura)
+  const nCols = Math.ceil(bbox.width  / tileW);
+  const nRows = Math.ceil(bbox.height / tileH);
+
+  let isFirst = true;
+  for (let row = 0; row < nRows; row++) {
+    for (let col = 0; col < nCols; col++) {
+      if (!isFirst || addPageAntes) pdf.addPage('a3', 'landscape');
+      isFirst = false;
+
+      const tileBbox = {
+        x:      bbox.x + col * tileW,
+        y:      bbox.y + row * tileH,
+        width:  tileW,
+        height: tileH,
+      };
+      const total = nCols * nRows;
+      const pag   = total > 1
+        ? `  ·  parte ${row * nCols + col + 1} de ${total}`
+        : '';
+      await adicionarPaginaComBBox(pdf, tileBbox, titulo, subtitulo + pag);
+    }
+  }
+}
+
 // ── Ponto de entrada: Exportar PDF A3 ────────────────────────────────────────
 async function exportarPDFA3(modo = 'atual') {
   if (!root) { alert('Organograma não carregado.'); return; }
@@ -914,34 +956,34 @@ async function exportarPDFA3(modo = 'atual') {
     const nTotal = TOTAL_NOS - 1;   // exclui __ROOT__
 
     if (modo === 'atual') {
-      // ── Uma página A3 — exporta exatamente o que está visível ────────────
-      setPdfLoading('Renderizando estado atual…');
+      // ── Exporta o que está visível; pagina automaticamente se muito largo ──
+      setPdfLoading('Calculando layout…');
       const bbox   = calcBBoxVisible(root, 50);
       const nVisib = root.descendants().filter(d => !d._children).length - 1;
-      await adicionarPaginaComBBox(pdf, bbox,
+      await paginarBBox(pdf, bbox,
         'Organograma', `${nVisib} de ${nTotal} colaboradores visíveis`);
 
     } else {
       // ── Por setor: visão geral + uma página por ramo expandido ────────────
 
-      // Pág 1 — todos os níveis visíveis (visão geral conjunta)
+      // Pág 1 — visão geral de todos os ramos juntos
       setPdfLoading('Renderizando visão geral…');
       const branches  = root.children || [];
       const bboxGeral = calcBBoxVisible(root, 50);
-      await adicionarPaginaComBBox(pdf, bboxGeral,
+      await paginarBBox(pdf, bboxGeral,
         'Visão Geral',
         `${nTotal} colaboradores  ·  ${branches.length} divisões de 1º nível`);
 
-      // Pág 2+ — uma por filho direto de root que tenha filhos visíveis
+      // Pág 2+ — uma (ou mais, se largo) por ramo com filhos visíveis
       const ramosComFilhos = branches.filter(b => b.children && b.children.length > 0);
       for (let i = 0; i < ramosComFilhos.length; i++) {
         const b    = ramosComFilhos[i];
         const nSub = b.descendants().filter(d => !d._children).length;
         setPdfLoading(`Renderizando: ${b.data.name} (${i+1}/${ramosComFilhos.length})…`);
-        pdf.addPage('a3', 'landscape');
         const bbox = calcBBoxVisible(b, 50);
-        await adicionarPaginaComBBox(pdf, bbox,
-          b.data.name, `${b.data.cargo}  ·  ${nSub} visíveis`);
+        await paginarBBox(pdf, bbox,
+          b.data.name, `${b.data.cargo}  ·  ${nSub} visíveis`,
+          true /* addPage antes */);
       }
     }
 
