@@ -57,28 +57,39 @@
     <div class="dropdown">
       <button class="btn btn-sm btn-outline-success dropdown-toggle"
               data-bs-toggle="dropdown" aria-expanded="false"
-              title="Exportar PDF A3">
-        <i class="bi bi-file-earmark-pdf me-1"></i>PDF
+              title="Exportar">
+        <i class="bi bi-file-earmark-arrow-down me-1"></i>Exportar
       </button>
-      <ul class="dropdown-menu dropdown-menu-end shadow">
+      <ul class="dropdown-menu dropdown-menu-end shadow" style="min-width:260px">
+        <li><h6 class="dropdown-header">PDF A3 Landscape — exporta o que está visível</h6></li>
         <li>
-          <button class="dropdown-item py-2" onclick="exportarPDFA3('completo')">
+          <button class="dropdown-item py-2" onclick="exportarPDFA3('atual')">
             <i class="bi bi-file-earmark-pdf text-primary me-2"></i>
-            <strong>A3 — Completo</strong>
-            <small class="text-muted d-block ms-4 mt-0">Todo o organograma em uma página A3</small>
+            <strong>A3 — Como está na tela</strong>
+            <small class="text-muted d-block ms-4">Todos os níveis atualmente expandidos</small>
           </button>
         </li>
         <li>
           <button class="dropdown-item py-2" onclick="exportarPDFA3('setores')">
             <i class="bi bi-files text-success me-2"></i>
             <strong>A3 — Por setor</strong>
-            <small class="text-muted d-block ms-4 mt-0">Visão geral + uma página A3 por divisão</small>
+            <small class="text-muted d-block ms-4">Uma página A3 por divisão principal</small>
           </button>
         </li>
         <li><hr class="dropdown-divider"></li>
+        <li><h6 class="dropdown-header">SVG vetorial — ideal para compartilhar digitalmente</h6></li>
         <li>
-          <button class="dropdown-item" onclick="exportarSVG()">
-            <i class="bi bi-download text-secondary me-2"></i>Baixar SVG vetorial
+          <button class="dropdown-item py-2" onclick="exportarSVG()">
+            <i class="bi bi-vector-pen text-secondary me-2"></i>
+            <strong>SVG — Como está na tela</strong>
+            <small class="text-muted d-block ms-4">Zoomável, nítido em qualquer resolução</small>
+          </button>
+        </li>
+        <li>
+          <button class="dropdown-item py-2" onclick="exportarSVGCompleto()">
+            <i class="bi bi-diagram-3 text-secondary me-2"></i>
+            <strong>SVG — Todos os níveis</strong>
+            <small class="text-muted d-block ms-4">Expande tudo e exporta</small>
           </button>
         </li>
       </ul>
@@ -724,12 +735,13 @@ document.addEventListener('fullscreenchange', () => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 // ── Constantes A3 landscape ───────────────────────────────────────────────────
-const A3_W_MM   = 420,  A3_H_MM   = 297;
-const MAR_MM    = 8;                                    // margem
-const HDR_MM    = 15;                                   // cabeçalho
-const CONT_W_MM = A3_W_MM - MAR_MM * 2;                // 404 mm
-const CONT_H_MM = A3_H_MM - MAR_MM * 2 - HDR_MM;      // 266 mm
-const PDF_DPI   = 220;                                  // resolução do canvas
+const A3_W_MM    = 420,  A3_H_MM   = 297;
+const MAR_MM     = 8;
+const HDR_MM     = 15;
+const CONT_W_MM  = A3_W_MM - MAR_MM * 2;            // 404 mm
+const CONT_H_MM  = A3_H_MM - MAR_MM * 2 - HDR_MM;  // 266 mm
+const PDF_DPI    = 220;
+const MAX_CV_DIM = 6000;   // cap de canvas — evita falha de alocação de memória
 
 // ── Carrega jsPDF dinamicamente ───────────────────────────────────────────────
 async function carregarJsPDF() {
@@ -746,66 +758,93 @@ async function carregarJsPDF() {
 }
 
 function setPdfLoading(msg) {
-  const el  = document.getElementById('pdf-loading');
-  const msg2 = document.getElementById('pdf-loading-msg');
+  const el = document.getElementById('pdf-loading');
   if (!el) return;
   if (msg === null) { el.style.display = 'none'; return; }
-  msg2.textContent = msg;
+  document.getElementById('pdf-loading-msg').textContent = msg;
   el.style.display = 'flex';
 }
 
-// ── Bounding box de um nó D3 e todos os seus descendentes ────────────────────
+// ── BBox de TODOS os descendentes de um nó (posição D3 pura, sem drag) ────────
 function calcBBoxNode(node, pad = 50) {
   const all = node.descendants();
   if (!all.length) return { x: 0, y: 0, width: 400, height: 200 };
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
   all.forEach(d => {
-    x0 = Math.min(x0, d.x - NW/2);
-    x1 = Math.max(x1, d.x + NW/2);
-    y0 = Math.min(y0, d.y - NH/2);
-    y1 = Math.max(y1, d.y + NH/2);
+    x0 = Math.min(x0, d.x - NW/2);  x1 = Math.max(x1, d.x + NW/2);
+    y0 = Math.min(y0, d.y - NH/2);  y1 = Math.max(y1, d.y + NH/2);
   });
   return { x: x0-pad, y: y0-pad, width: x1-x0+pad*2, height: y1-y0+pad*2 };
 }
 
-// ── Renderiza uma região do SVG para canvas ───────────────────────────────────
-async function renderBBoxToCanvas(bbox, canvasW, canvasH) {
+// ── BBox apenas dos nós VISÍVEIS (d.children), inclui offsets de drag ─────────
+//    Use este para exportar "o que está na tela agora"
+function calcBBoxVisible(node, pad = 50) {
+  const visible = [];
+  (function traverse(d) {
+    visible.push(d);
+    if (d.children) d.children.forEach(traverse);
+  })(node);
+  if (!visible.length) return { x: 0, y: 0, width: 400, height: 200 };
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  visible.forEach(d => {
+    const p = getPos(d);
+    x0 = Math.min(x0, p.x - NW/2);  x1 = Math.max(x1, p.x + NW/2);
+    y0 = Math.min(y0, p.y - NH/2);  y1 = Math.max(y1, p.y + NH/2);
+  });
+  return { x: x0-pad, y: y0-pad, width: x1-x0+pad*2, height: y1-y0+pad*2 };
+}
+
+// ── Estilos inline para exportação (sem variáveis CSS / dark-mode) ────────────
+const EXPORT_SVG_STYLES = `
+  .org-link       { fill:none; stroke:#adb5bd; stroke-width:1.5px }
+  .org-link-extra { fill:none; stroke:#fd7e14; stroke-width:1.8px;
+                    stroke-dasharray:6,3; opacity:.85 }
+  .org-body-bg    { fill:#ffffff }
+  .org-cargo-txt  { fill:rgba(255,255,255,.92); font-size:10px; font-weight:bold;
+                    font-family:Arial,Helvetica,sans-serif; pointer-events:none }
+  .org-nome-txt   { fill:#212529; font-size:12px; font-weight:bold;
+                    font-family:Arial,Helvetica,sans-serif; pointer-events:none }
+  .org-edit-btn   { display:none }
+  .org-dot        { display:none }
+  .org-multi-dot  { fill:#fd7e14; stroke:white; stroke-width:1.2px }
+  .org-border     { stroke-width:1.8px }
+`;
+
+// ── Clona SVG com viewBox e estilos inline para exportação ────────────────────
+function clonarSVGComBBox(bbox) {
   const svgEl = document.getElementById('org-svg');
   const clone = svgEl.cloneNode(true);
-
-  clone.setAttribute('width',   String(canvasW));
-  clone.setAttribute('height',  String(canvasH));
   clone.setAttribute('viewBox', `${bbox.x} ${bbox.y} ${bbox.width} ${bbox.height}`);
-  clone.style.background = '#ffffff';
-
-  // Remove transform de zoom do grupo raiz (viewBox cobre o posicionamento)
+  clone.setAttribute('width',  String(Math.round(bbox.width)));
+  clone.setAttribute('height', String(Math.round(bbox.height)));
+  clone.removeAttribute('style');
+  // Remove transform de zoom — o viewBox cobre o posicionamento
   const orgRootG = clone.querySelector('.org-root');
   if (orgRootG) orgRootG.removeAttribute('transform');
-
-  // Inline de estilos críticos (sem variáveis CSS / dark-mode)
+  // Injeta estilos sem variáveis CSS (compatível com qualquer fundo)
   const styleEl = document.createElementNS('http://www.w3.org/2000/svg', 'style');
-  styleEl.textContent = `
-    .org-link       { fill:none; stroke:#adb5bd; stroke-width:1.5px }
-    .org-link-extra { fill:none; stroke:#fd7e14; stroke-width:1.8px;
-                      stroke-dasharray:6,3; opacity:.85 }
-    .org-body-bg    { fill:#ffffff }
-    .org-cargo-txt  { fill:rgba(255,255,255,.92); font-size:10px; font-weight:bold;
-                      font-family:Arial,Helvetica,sans-serif; pointer-events:none }
-    .org-nome-txt   { fill:#212529; font-size:12px; font-weight:bold;
-                      font-family:Arial,Helvetica,sans-serif; pointer-events:none }
-    .org-edit-btn   { display:none }
-    .org-dot        { display:none }
-    .org-multi-dot  { fill:#fd7e14; stroke:white; stroke-width:1.2px }
-  `;
+  styleEl.textContent = EXPORT_SVG_STYLES;
   clone.insertBefore(styleEl, clone.firstChild);
+  return clone;
+}
 
-  let svgStr = new XMLSerializer().serializeToString(clone);
-  if (!svgStr.includes('xmlns="http://www.w3.org/2000/svg"'))
-    svgStr = svgStr.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+function svgParaString(clone) {
+  let s = new XMLSerializer().serializeToString(clone);
+  if (!s.includes('xmlns="http://www.w3.org/2000/svg"'))
+    s = s.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+  return s;
+}
 
-  const blob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
-  const url  = URL.createObjectURL(blob);
-
+// ── Renderiza bbox do SVG para canvas (para uso no PDF) ───────────────────────
+async function renderBBoxToCanvas(bbox, canvasW, canvasH) {
+  const clone = clonarSVGComBBox(bbox);
+  clone.setAttribute('width',  String(canvasW));
+  clone.setAttribute('height', String(canvasH));
+  clone.style.background = '#ffffff';
+  const svgStr = svgParaString(clone);
+  const blob   = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+  const url    = URL.createObjectURL(blob);
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
@@ -823,117 +862,86 @@ async function renderBBoxToCanvas(bbox, canvasW, canvasH) {
   });
 }
 
-// ── Desenha cabeçalho colorido no topo da página PDF ─────────────────────────
+// ── Cabeçalho colorido no topo da página PDF ──────────────────────────────────
 function addPdfHeader(pdf, titulo, subtitulo) {
   const pW = pdf.internal.pageSize.getWidth();
   const pn = pdf.internal.getCurrentPageInfo().pageNumber;
-
-  pdf.setFillColor(30, 58, 95);   // azul escuro
+  pdf.setFillColor(30, 58, 95);   // azul ALISEO
   pdf.rect(0, 0, pW, HDR_MM, 'F');
-
-  pdf.setFontSize(12);
-  pdf.setFont('helvetica', 'bold');
-  pdf.setTextColor(255, 255, 255);
+  pdf.setFontSize(12); pdf.setFont('helvetica', 'bold'); pdf.setTextColor(255, 255, 255);
   pdf.text('ALISEO SA  ·  ' + titulo, MAR_MM, HDR_MM * 0.65);
-
   const dt = new Date().toLocaleDateString('pt-BR');
-  pdf.setFontSize(7.5);
-  pdf.setFont('helvetica', 'normal');
-  pdf.setTextColor(185, 210, 235);
+  pdf.setFontSize(7.5); pdf.setFont('helvetica', 'normal'); pdf.setTextColor(185, 210, 235);
   const right = (subtitulo ? subtitulo + '   ·   ' : '') + dt + '   ·   pág. ' + pn;
   pdf.text(right, pW - MAR_MM, HDR_MM * 0.65, { align: 'right' });
 }
 
-// ── Adiciona uma página com o subtree de um nó ────────────────────────────────
-async function adicionarPaginaSubtree(pdf, node, titulo, subtitulo = '') {
-  const bbox = calcBBoxNode(node);
+// ── Adiciona uma página PDF com um bbox específico do organograma ─────────────
+async function adicionarPaginaComBBox(pdf, bbox, titulo, subtitulo = '') {
+  const fx = CONT_W_MM / bbox.width, fy = CONT_H_MM / bbox.height;
+  const f  = Math.min(fx, fy);
+  const iW = bbox.width * f, iH = bbox.height * f;
+  const iX = MAR_MM + (CONT_W_MM - iW) / 2;
+  const iY = MAR_MM + HDR_MM + (CONT_H_MM - iH) / 2;
 
-  // Escala para caber em CONT_W × CONT_H preservando proporção
-  const fatorX = CONT_W_MM / bbox.width;
-  const fatorY = CONT_H_MM / bbox.height;
-  const fator  = Math.min(fatorX, fatorY);
-
-  const imgW   = bbox.width  * fator;
-  const imgH   = bbox.height * fator;
-  const imgX   = MAR_MM + (CONT_W_MM - imgW) / 2;
-  const imgY   = MAR_MM + HDR_MM + (CONT_H_MM - imgH) / 2;
-
-  // Canvas em alta resolução (PDF_DPI)
-  const cvW = Math.round(imgW / 25.4 * PDF_DPI);
-  const cvH = Math.round(imgH / 25.4 * PDF_DPI);
+  // Canvas em alta resolução com cap para evitar falha de memória
+  let cvW = Math.round(iW / 25.4 * PDF_DPI);
+  let cvH = Math.round(iH / 25.4 * PDF_DPI);
+  if (Math.max(cvW, cvH) > MAX_CV_DIM) {
+    const s = MAX_CV_DIM / Math.max(cvW, cvH);
+    cvW = Math.round(cvW * s); cvH = Math.round(cvH * s);
+  }
 
   const canvas  = await renderBBoxToCanvas(bbox, cvW, cvH);
   const imgData = canvas.toDataURL('image/jpeg', 0.93);
-
   addPdfHeader(pdf, titulo, subtitulo);
-  pdf.addImage(imgData, 'JPEG', imgX, imgY, imgW, imgH, undefined, 'FAST');
+  pdf.addImage(imgData, 'JPEG', iX, iY, iW, iH, undefined, 'FAST');
 }
 
-// ── Ponto de entrada do export ────────────────────────────────────────────────
-async function exportarPDFA3(modo = 'completo') {
+// ── Ponto de entrada: Exportar PDF A3 ────────────────────────────────────────
+async function exportarPDFA3(modo = 'atual') {
   if (!root) { alert('Organograma não carregado.'); return; }
 
-  // Salva estado de colapso atual
+  // Salva estado de colapso para restaurar depois
   const colapsados = new Set();
   root.descendants().forEach(d => { if (d._children) colapsados.add(d._uid); });
 
   try {
     setPdfLoading('Carregando biblioteca PDF…');
-    const jsPDF = await carregarJsPDF();
+    const jsPDF  = await carregarJsPDF();
+    const pdf    = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
+    const dt     = new Date().toISOString().slice(0, 10);
+    const nTotal = TOTAL_NOS - 1;   // exclui __ROOT__
 
-    // Expande tudo e recalcula layout (sem animar — só posições)
-    setPdfLoading('Calculando layout completo…');
-    root.descendants().forEach(d => {
-      if (d._children) { d.children = d._children; d._children = null; }
-    });
-    d3.tree().nodeSize([NW + HGAP, NH + VGAP])(root);
-
-    const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
-    const dt  = new Date().toISOString().slice(0, 10);
-    const nTotal = TOTAL_NOS - 1;  // exclui __ROOT__
-
-    if (modo === 'completo') {
-      // ─────── Uma única página A3 com tudo ────────────────────────────────
-      setPdfLoading('Renderizando organograma completo…');
-      await adicionarPaginaSubtree(
-        pdf, root,
-        'Organograma Completo',
-        `${nTotal} colaboradores`,
-      );
+    if (modo === 'atual') {
+      // ── Uma página A3 — exporta exatamente o que está visível ────────────
+      setPdfLoading('Renderizando estado atual…');
+      const bbox   = calcBBoxVisible(root, 50);
+      const nVisib = root.descendants().filter(d => !d._children).length - 1;
+      await adicionarPaginaComBBox(pdf, bbox,
+        'Organograma', `${nVisib} de ${nTotal} colaboradores visíveis`);
 
     } else {
-      // ─────── Visão geral (níveis 0-1) + uma página por divisão ──────────
+      // ── Por setor: visão geral + uma página por ramo expandido ────────────
 
-      // Pág 1: apenas root + filhos diretos (colapsa o resto)
-      setPdfLoading('Renderizando visão geral (nível 1)…');
-      root.descendants().forEach(d => {
-        if (d.depth >= 1 && d.children) { d._children = d.children; d.children = null; }
-      });
-      d3.tree().nodeSize([NW + HGAP, NH + VGAP])(root);
-      await adicionarPaginaSubtree(
-        pdf, root,
+      // Pág 1 — todos os níveis visíveis (visão geral conjunta)
+      setPdfLoading('Renderizando visão geral…');
+      const branches  = root.children || [];
+      const bboxGeral = calcBBoxVisible(root, 50);
+      await adicionarPaginaComBBox(pdf, bboxGeral,
         'Visão Geral',
-        `${nTotal} colaboradores  ·  ${(root.children||[]).length} divisões`,
-      );
+        `${nTotal} colaboradores  ·  ${branches.length} divisões de 1º nível`);
 
-      // Reexpande tudo para as páginas seguintes
-      root.descendants().forEach(d => {
-        if (d._children) { d.children = d._children; d._children = null; }
-      });
-      d3.tree().nodeSize([NW + HGAP, NH + VGAP])(root);
-
-      // Pág 2+: uma por filho direto da raiz
-      const branches = root.children || [];
-      for (let i = 0; i < branches.length; i++) {
-        const b   = branches[i];
-        const nSub = b.descendants().length - 1;
-        setPdfLoading(`Renderizando: ${b.data.name} (${i+1}/${branches.length})…`);
+      // Pág 2+ — uma por filho direto de root que tenha filhos visíveis
+      const ramosComFilhos = branches.filter(b => b.children && b.children.length > 0);
+      for (let i = 0; i < ramosComFilhos.length; i++) {
+        const b    = ramosComFilhos[i];
+        const nSub = b.descendants().filter(d => !d._children).length;
+        setPdfLoading(`Renderizando: ${b.data.name} (${i+1}/${ramosComFilhos.length})…`);
         pdf.addPage('a3', 'landscape');
-        await adicionarPaginaSubtree(
-          pdf, b,
-          b.data.name,
-          `${b.data.cargo}  ·  ${nSub} colaboradores`,
-        );
+        const bbox = calcBBoxVisible(b, 50);
+        await adicionarPaginaComBBox(pdf, bbox,
+          b.data.name, `${b.data.cargo}  ·  ${nSub} visíveis`);
       }
     }
 
@@ -945,7 +953,7 @@ async function exportarPDFA3(modo = 'completo') {
     alert('Erro ao gerar PDF: ' + err.message);
   } finally {
     setPdfLoading(null);
-    // Restaura colapso original
+    // Restaura estado de colapso original
     root.descendants().forEach(d => {
       if (colapsados.has(d._uid) && d.children) {
         d._children = d.children; d.children = null;
@@ -955,50 +963,56 @@ async function exportarPDFA3(modo = 'completo') {
   }
 }
 
-// ── Exportar SVG ──────────────────────────────────────────────────────────────
+// ── Exportar SVG — apenas nós visíveis (estado atual) ────────────────────────
 function exportarSVG() {
-  const prevTransform = currentTransform;
-  root && root.descendants().forEach(d=>{
-    if(d._children){d.children=d._children;d._children=null;}
-  });
-  update(root);
-  setTimeout(()=>{
-    const b = gRoot.node().getBBox();
-    const pad = 30;
-    const svgEl = document.getElementById('org-svg');
-    const clone = svgEl.cloneNode(true);
-    clone.setAttribute('viewBox', `${b.x-pad} ${b.y-pad} ${b.width+pad*2} ${b.height+pad*2}`);
-    clone.setAttribute('width',  b.width  + pad*2);
-    clone.setAttribute('height', b.height + pad*2);
-    // Remove transform do grupo raiz no clone
-    clone.querySelector('.org-root')?.removeAttribute('transform');
+  if (!root) { alert('Organograma não carregado.'); return; }
+  const bbox   = calcBBoxVisible(root, 30);
+  const clone  = clonarSVGComBBox(bbox);
+  const svgStr = svgParaString(clone);
+  const dt     = new Date().toISOString().slice(0, 10);
+  const blob   = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+  const url    = URL.createObjectURL(blob);
+  const a      = document.createElement('a');
+  a.href = url; a.download = `organograma_${dt}.svg`; a.click();
+  URL.revokeObjectURL(url);
+}
 
-    // Inline dos estilos críticos
-    const style = document.createElement('style');
-    style.textContent = `
-      .org-link{fill:none;stroke:#adb5bd;stroke-width:1.5px}
-      .org-link-extra{fill:none;stroke:#fd7e14;stroke-width:1.8px;stroke-dasharray:6,3;opacity:.8}
-      .org-body-bg{fill:#fff}
-      .org-cargo-txt{fill:#ffffffdd;font-size:10px;font-weight:500;font-family:Arial,sans-serif}
-      .org-nome-txt{fill:#212529;font-size:12px;font-weight:700;font-family:Arial,sans-serif}
-      .org-dot{transition:fill .2s}
-    `;
-    clone.insertBefore(style, clone.firstChild);
+// ── Exportar SVG — todos os níveis (expande tudo antes de capturar) ───────────
+async function exportarSVGCompleto() {
+  if (!root) { alert('Organograma não carregado.'); return; }
+  setPdfLoading('Expandindo todos os níveis…');
 
-    const blob = new Blob([clone.outerHTML], {type:'image/svg+xml;charset=utf-8'});
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href = url; a.download = 'organograma.svg'; a.click();
-    URL.revokeObjectURL(url);
+  const colapsados = new Set();
+  root.descendants().forEach(d => { if (d._children) colapsados.add(d._uid); });
 
-    // Restaura estado
-    gRoot.attr('transform', prevTransform.toString());
-    root && root.descendants().forEach(d=>{
-      const n=d.data.nivel??99;
-      if(d.depth>0&&d.children&&(n>=5||d.depth>=4)){d._children=d.children;d.children=null;}
+  try {
+    // Expande tudo e aguarda transições D3 (T=260ms) completarem
+    root.descendants().forEach(d => {
+      if (d._children) { d.children = d._children; d._children = null; }
     });
-    update(root); setTimeout(ajustarTela, 200);
-  }, 600);
+    update(root);
+    await new Promise(r => setTimeout(r, 400));
+
+    setPdfLoading('Gerando SVG completo…');
+    const bbox   = calcBBoxVisible(root, 30);
+    const clone  = clonarSVGComBBox(bbox);
+    const svgStr = svgParaString(clone);
+    const dt     = new Date().toISOString().slice(0, 10);
+    const blob   = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+    const url    = URL.createObjectURL(blob);
+    const a      = document.createElement('a');
+    a.href = url; a.download = `organograma_completo_${dt}.svg`; a.click();
+    URL.revokeObjectURL(url);
+  } finally {
+    setPdfLoading(null);
+    // Restaura estado de colapso original
+    root.descendants().forEach(d => {
+      if (colapsados.has(d._uid) && d.children) {
+        d._children = d.children; d.children = null;
+      }
+    });
+    update(root);
+  }
 }
 
 // ── Modal de edição ───────────────────────────────────────────────────────────
