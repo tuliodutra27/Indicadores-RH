@@ -92,6 +92,15 @@
             <small class="text-muted d-block ms-4">Expande tudo e exporta</small>
           </button>
         </li>
+        <li><hr class="dropdown-divider"></li>
+        <li><h6 class="dropdown-header">CSV — dados tabulares</h6></li>
+        <li>
+          <button class="dropdown-item py-2" onclick="exportarCSV()">
+            <i class="bi bi-filetype-csv text-warning me-2"></i>
+            <strong>CSV — Todos os colaboradores</strong>
+            <small class="text-muted d-block ms-4">Nome, cargo, gestor, nível — abre no Excel</small>
+          </button>
+        </li>
       </ul>
     </div>
   </div>
@@ -1083,6 +1092,65 @@ async function exportarSVGCompleto() {
     });
     update(root);
   }
+}
+
+// ── Exportar CSV — todos os colaboradores (separador ; para Excel pt-BR) ──────
+function exportarCSV() {
+  if (!root) { alert('Organograma não carregado.'); return; }
+
+  // lookup id → nome para resolver o gestor pelo parentId
+  const nomeById = {};
+  FLAT_DATA.forEach(d => { nomeById[d.id] = d.name || d.id; });
+
+  const cabecalho = ['Nome', 'Cargo', 'Departamento', 'Tipo', 'Matrícula / Chave',
+                     'Gestor (hierarquia principal)', 'Nível', 'Posição no organograma'];
+
+  const linhas = FLAT_DATA
+    .filter(d => d.id !== '__ROOT__')
+    .map(d => {
+      // Gestor: nome do pai, ou "Raiz" se reporta diretamente à ALISEO SA
+      const gestor = d.parentId && d.parentId !== '__ROOT__'
+        ? (nomeById[d.parentId] || d.parentId)
+        : 'ALISEO SA (Raiz)';
+
+      // Nível hierárquico por label
+      const nivel = NIVEL_LABEL[String(d.nivel ?? '')] || (d.nivel != null ? `Nível ${d.nivel}` : '—');
+
+      // Matrícula para CLT, chave PJ para PJ
+      const matricula = d.id.startsWith('CLT::')
+        ? d.id.replace('CLT::', '')
+        : d.id.replace('PJ::', '');
+
+      const posicao = d.manual ? 'Confirmada manualmente' : 'Sugerida automaticamente';
+
+      return [
+        d.name        || '',
+        d.cargo       || '',
+        d.departamento|| '',
+        d.tipo        || '',
+        matricula,
+        gestor,
+        nivel,
+        posicao,
+      ];
+    });
+
+  // Ordena por nome (pt-BR ciente de acentos)
+  linhas.sort((a, b) => a[0].localeCompare(b[0], 'pt-BR'));
+
+  // Monta CSV com separador ; e aspas duplas em todos os campos
+  const escapar = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const csv = [cabecalho, ...linhas]
+    .map(row => row.map(escapar).join(';'))
+    .join('\r\n');
+
+  // BOM UTF-8 (﻿) → Excel abre com acentos corretos sem precisar importar
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const dt   = new Date().toISOString().slice(0, 10);
+  const a    = document.createElement('a');
+  a.href = url; a.download = `organograma_${dt}.csv`; a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ── Modal de edição ───────────────────────────────────────────────────────────
