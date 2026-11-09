@@ -23,13 +23,7 @@ from werkzeug.utils import secure_filename
 from io import BytesIO
 
 from auth import autenticar_ad
-from comparador import (
-    processar_planilha, gerar_excel, carregar_planilha,
-    carregar_estrutura_org, salvar_posicao_org, salvar_posicoes_org,
-    salvar_relacoes_org, gerar_organograma_hibrido,
-    validar_posicao_org, carregar_historico_org,
-    restaurar_snapshot_org, importar_estrutura_org,
-)
+from comparador import processar_planilha, gerar_excel, carregar_planilha
 
 # ── App ────────────────────────────────────────────────────────────────────
 app = Flask(__name__)
@@ -236,7 +230,7 @@ def download(id):
 @login_required
 def colaboradores(id):
     """Exibe todos os colaboradores do snapshot de uma comparação."""
-    snapshots = list(SNAPSHOTS_DIR.glob(f"snapshot_{id}_*.xlsx"))
+    snapshots = list(SNAPSHOTS_DIR.glob(f"snapshot_{id}_*.xls*"))  # .xls ou .xlsx
     if not snapshots:
         flash("Snapshot não encontrado para esta comparação.", "warning")
         return redirect(url_for("dashboard"))
@@ -254,12 +248,11 @@ def colaboradores(id):
         tipo = "PJ" if chave.startswith("PJ::") else "CLT"
         colaboradores_list.append({
             "tipo":         tipo,
-            "matricula":    str(row.get("MATRÍCULA", "")),
+            "matricula":    str(row.get("CÓDIGO", "")),
             "nome":         str(row.get("NOME", "")),
-            "cargo":        str(row.get("CARGO", "")),
+            "cargo":        str(row.get("FUNÇÃO", "")),
             "departamento": str(row.get("DEPARTAMENTO", "")),
-            "gestor":       str(row.get("GESTOR", "")),
-            "admissao":     str(row.get("ADMISSÃO", "")),
+            "admissao":     str(row.get("DATA DE ADMISSÃO", "")),
         })
 
     colaboradores_list.sort(key=lambda x: x["nome"])
@@ -275,159 +268,6 @@ def colaboradores(id):
         total_clt=total_clt,
         total_pj=total_pj,
     )
-
-
-@app.route("/organograma/<id>")
-@login_required
-def organograma(id):
-    """Exibe o organograma hierárquico do efetivo com edição manual de posições."""
-    snapshots = list(SNAPSHOTS_DIR.glob(f"snapshot_{id}_*.xlsx"))
-    if not snapshots:
-        flash("Snapshot não encontrado para esta comparação.", "warning")
-        return redirect(url_for("dashboard"))
-
-    df = carregar_planilha(snapshots[0])
-    historico = carregar_historico()
-    meta = next((h for h in historico if h["id"] == id), {})
-
-    # Monta lista de colaboradores com a chave do snapshot
-    colab_list = []
-    for chave, row in df.iterrows():
-        tipo = "PJ" if chave.startswith("PJ::") else "CLT"
-        colab_list.append({
-            "chave":        chave,
-            "tipo":         tipo,
-            "nome":         str(row.get("NOME", "")),
-            "cargo":        str(row.get("CARGO", "")),
-            "departamento": str(row.get("DEPARTAMENTO", "")),
-        })
-
-    # Carrega posições manuais salvas e gera organograma híbrido
-    struct    = carregar_estrutura_org(DATA_DIR)
-    resultado = gerar_organograma_hibrido(colab_list, struct["posicoes"], struct["relacoes"])
-
-    # Lista completa para o dropdown de seleção de pai no modal
-    todos_colab = sorted(
-        [{"chave": c["chave"], "nome": c["nome"], "cargo": c["cargo"]}
-         for c in colab_list],
-        key=lambda x: x["nome"],
-    )
-    # Adiciona o nó raiz como opção válida de pai
-    todos_colab.insert(0, {
-        "chave": "__ROOT__",
-        "nome":  "ALISEO SA",
-        "cargo": "Conselho de Administração",
-    })
-
-    return render_template(
-        "organograma.html",
-        arvore         = resultado["nodes"],
-        arestas_extras = resultado["arestas_extras"],
-        todos_colab    = todos_colab,
-        n_manual       = resultado["n_manual"],
-        n_sugerido     = resultado["n_sugerido"],
-        meta           = meta,
-        total          = len(colab_list),
-    )
-
-
-# ── API: edição do organograma ─────────────────────────────────────────────
-
-@app.route("/api/organograma/posicao", methods=["POST"])
-@login_required
-def api_salvar_posicao_org():
-    """Salva a posição hierárquica de UM colaborador (AJAX)."""
-    data = request.get_json(silent=True) or {}
-    chave        = data.get("chave", "").strip()
-    parent_chave = data.get("parentChave", "").strip()
-    nome_pessoa  = data.get("nomePessoa", chave)
-    if not chave or chave == "__ROOT__":
-        return {"ok": False, "erro": "chave inválida"}, 400
-
-    # Valida se não cria ciclo
-    struct = carregar_estrutura_org(DATA_DIR)
-    ok_ciclo, msg_ciclo = validar_posicao_org(struct["posicoes"], chave, parent_chave)
-    if not ok_ciclo:
-        return {"ok": False, "erro": msg_ciclo, "ciclo": True}, 409
-
-    pai_label = parent_chave if parent_chave and parent_chave != "__ROOT__" else "Conselho"
-    acao = f"Posição: {nome_pessoa} → {pai_label}"
-    try:
-        salvar_posicao_org(DATA_DIR, chave, parent_chave, session.get("usuario", ""), acao=acao)
-        return {"ok": True}
-    except Exception as exc:
-        return {"ok": False, "erro": str(exc)}, 500
-
-
-@app.route("/api/organograma/relacoes", methods=["POST"])
-@login_required
-def api_salvar_relacoes_org():
-    """Salva os gestores adicionais (múltiplos) de UM colaborador (AJAX)."""
-    data       = request.get_json(silent=True) or {}
-    filho      = data.get("filho", "").strip()
-    pais       = data.get("pais", [])
-    nome_filho = data.get("nomePessoa", filho)
-    if not filho or filho == "__ROOT__":
-        return {"ok": False, "erro": "filho inválido"}, 400
-    n = len(pais)
-    acao = f"Gestores adicionais de {nome_filho}: {n} selecionado(s)"
-    try:
-        salvar_relacoes_org(DATA_DIR, filho, pais, session.get("usuario", ""), acao=acao)
-        return {"ok": True}
-    except Exception as exc:
-        return {"ok": False, "erro": str(exc)}, 500
-
-
-@app.route("/api/organograma/historico", methods=["GET"])
-@login_required
-def api_historico_org():
-    """Retorna o log de alterações do organograma."""
-    return {"historico": carregar_historico_org(DATA_DIR)}
-
-
-@app.route("/api/organograma/restaurar", methods=["POST"])
-@login_required
-def api_restaurar_org():
-    """Restaura o organograma para um snapshot específico."""
-    data = request.get_json(silent=True) or {}
-    ts   = data.get("ts", "").strip()
-    if not ts:
-        return {"ok": False, "erro": "timestamp inválido"}, 400
-    ok, msg = restaurar_snapshot_org(DATA_DIR, ts, session.get("usuario", ""))
-    if ok:
-        return {"ok": True, "msg": msg}
-    return {"ok": False, "erro": msg}, 400
-
-
-@app.route("/api/organograma/importar", methods=["POST"])
-@login_required
-def api_importar_org():
-    """Importa/substitui toda a estrutura do organograma (JSON completo)."""
-    data     = request.get_json(silent=True) or {}
-    posicoes = data.get("posicoes")
-    relacoes = data.get("relacoes_adicionais", data.get("relacoes", []))
-    if posicoes is None:
-        return {"ok": False, "erro": "JSON inválido: campo 'posicoes' ausente."}, 400
-    try:
-        importar_estrutura_org(DATA_DIR, posicoes, relacoes, session.get("usuario", ""))
-        return {"ok": True}
-    except Exception as exc:
-        return {"ok": False, "erro": str(exc)}, 500
-
-
-@app.route("/api/organograma/aceitar-sugestoes", methods=["POST"])
-@login_required
-def api_aceitar_sugestoes_org():
-    """Confirma em lote as posições sugeridas automaticamente (AJAX)."""
-    data     = request.get_json(silent=True) or {}
-    posicoes = data.get("posicoes", {})
-    if not posicoes:
-        return {"ok": False, "erro": "nenhuma posição enviada"}, 400
-    try:
-        salvar_posicoes_org(DATA_DIR, posicoes, session.get("usuario", ""))
-        return {"ok": True}
-    except Exception as exc:
-        return {"ok": False, "erro": str(exc)}, 500
 
 
 @app.route("/historico/<id>/excluir", methods=["POST"])

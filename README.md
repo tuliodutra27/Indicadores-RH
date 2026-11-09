@@ -11,12 +11,12 @@
 
 ## 🎯 O que faz
 
-A cada semana o RH envia uma planilha `.xlsx` com todos os colaboradores ativos. Este sistema:
+A cada semana o RH envia uma planilha (`.xls` ou `.xlsx`) com todos os colaboradores ativos. Este sistema:
 
 - **Compara** a nova planilha com a anterior automaticamente
-- **Detecta** admissões, desligamentos e alterações de cargo/departamento/gestor
+- **Detecta** admissões, desligamentos e alterações de função/departamento
 - **Exibe** as diferenças em uma interface web com abas e filtro por nome
-- **Lista** o efetivo completo com filtros por tipo, cargo, departamento e gestor
+- **Lista** o efetivo completo com filtros por tipo, função e departamento
 - **Gera** relatório em Excel formatado com cores para download
 - **Controla** acesso via Active Directory (um ou múltiplos grupos)
 
@@ -30,10 +30,10 @@ A cada semana o RH envia uma planilha `.xlsx` com todos os colaboradores ativos.
 | 👥 Múltiplos grupos | Libere acesso para TI, Diretoria, RH — quantos grupos quiser |
 | 🌙 Dark mode | Alternância claro/escuro salva na preferência do usuário |
 | 📊 Dashboard | Cards clicáveis com resumo da última comparação |
-| 📤 Upload de planilha | Envio do `.xlsx` via drag‑and‑drop ou seleção |
+| 📤 Upload de planilha | Envio do `.xls`/`.xlsx` via drag‑and‑drop ou seleção |
 | 🆕 Admissões | Colaboradores que entraram entre as duas planilhas |
 | ❌ Desligamentos | Colaboradores que saíram entre as duas planilhas |
-| 🔄 Alterações | Mudanças de CARGO, DEPARTAMENTO ou GESTOR |
+| 🔄 Alterações | Mudanças de FUNÇÃO ou DEPARTAMENTO |
 | 👤 Efetivo completo | Lista todos os colaboradores com filtros avançados |
 | 📜 Histórico | Dashboard com todas as comparações anteriores |
 | 📥 Export Excel | Relatório com células coloridas por tipo de evento |
@@ -43,7 +43,7 @@ A cada semana o RH envia uma planilha `.xlsx` com todos os colaboradores ativos.
 ## 🧱 Stack
 
 - **Backend:** Python 3.12 + Flask 3.1 + Gunicorn
-- **Planilhas:** pandas + openpyxl
+- **Planilhas:** pandas + openpyxl (`.xlsx`) + xlrd (`.xls`)
 - **Autenticação:** ldap3 (Active Directory / LDAP)
 - **Frontend:** Bootstrap 5.3 + Bootstrap Icons
 - **Infraestrutura:** Docker + Docker Compose
@@ -179,7 +179,7 @@ Os dados ficam em `web/data/` (volume Docker montado em `/data` no container):
 data/
 ├── historico.json            ← índice de todas as comparações
 ├── snapshots/                ← cópias das planilhas enviadas (base de comparação)
-│   └── snapshot_20250527_143000_26-05.xlsx
+│   └── snapshot_20250527_143000_26-05.xls   (mantém a extensão original: .xls ou .xlsx)
 ├── relatorios/               ← resultados em JSON por comparação
 │   └── resultado_20250527_143000.json
 └── uploads/                  ← arquivos enviados pelos usuários
@@ -191,17 +191,23 @@ data/
 
 ## 📌 Regras de negócio
 
+### Formato da planilha do RH
+
+- Aba **`Ativos`** (a aba `Demitidos`, se existir, é ignorada). Se não houver aba com esse nome, usa a primeira.
+- O cabeçalho é localizado automaticamente (a linha de título e linhas em branco no topo não atrapalham).
+- Colunas: `Código`, `Nome`, `Função`, `Departamento`, `Data de Admissão`.
+- Planilhas e snapshots do modelo antigo (`Matrícula`, `Cargo`, `Admissão`) continuam sendo lidos.
+
 ### Chave de identificação dos colaboradores
 
 | Tipo | Campo-chave | Chave interna |
 |---|---|---|
-| **CLT** | MATRÍCULA numérica | `CLT::610` |
-| **PJ** | NOME (sem matrícula numérica) | `PJ::FULANO DA SILVA` |
+| **CLT** | CÓDIGO numérico | `CLT::610` |
+| **PJ** | NOME (código vazio ou `PJ`) | `PJ::FULANO DA SILVA` |
 
 ### Campos monitorados para "alteração"
-- **CARGO**
+- **FUNÇÃO**
 - **DEPARTAMENTO**
-- **GESTOR**
 
 ### Fluxo de comparação
 1. **Primeira planilha** → criada como baseline (nenhuma diferença exibida)
@@ -298,8 +304,8 @@ docker compose logs
 - Qualquer formato funciona: `NOME`, `CN=NOME` ou DN completo
 
 ### Planilha não processa / erro de colunas
-- Verifique se não há linhas em branco **no topo** (antes do cabeçalho)
-- Colunas esperadas: `MATRÍCULA, NOME, CARGO, DEPARTAMENTO, GESTOR, ADMISSÃO`
+- Colunas esperadas na aba `Ativos`: `Código, Nome, Função, Departamento, Data de Admissão`
+- A mensagem de erro na tela diz o que faltou (ex.: coluna ausente, cabeçalho não encontrado, planilha só com cabeçalho)
 
 ### Porta 5000 já em uso
 ```env

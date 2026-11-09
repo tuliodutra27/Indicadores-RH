@@ -11,9 +11,6 @@
       <a href="{{ url_for('dashboard') }}" class="btn btn-sm btn-outline-secondary">
         <i class="bi bi-arrow-left me-1"></i>Dashboard
       </a>
-      <a href="{{ url_for('organograma', id=meta.id) }}" class="btn btn-sm btn-outline-primary">
-        <i class="bi bi-diagram-3 me-1"></i>Organograma
-      </a>
       {% if not meta.get('is_baseline') %}
       <a href="{{ url_for('resultado', id=meta.id) }}" class="btn btn-sm btn-outline-primary">
         <i class="bi bi-file-earmark-bar-graph me-1"></i>Ver comparação
@@ -84,13 +81,13 @@
         </div>
       </div>
 
-      <!-- Cargo -->
+      <!-- Função -->
       <div class="col-12 col-sm col-md">
         <label class="form-label form-label-sm fw-semibold mb-1" for="filtroCargo">
-          <i class="bi bi-briefcase me-1"></i>Cargo
+          <i class="bi bi-briefcase me-1"></i>Função
         </label>
         <select id="filtroCargo" class="form-select form-select-sm" onchange="aplicarFiltros()">
-          <option value="">Todos os cargos</option>
+          <option value="">Todas as funções</option>
         </select>
       </div>
 
@@ -104,23 +101,13 @@
         </select>
       </div>
 
-      <!-- Gestor -->
-      <div class="col-12 col-sm col-md">
-        <label class="form-label form-label-sm fw-semibold mb-1" for="filtroGestor">
-          <i class="bi bi-person-check me-1"></i>Gestor
-        </label>
-        <select id="filtroGestor" class="form-select form-select-sm" onchange="aplicarFiltros()">
-          <option value="">Todos os gestores</option>
-        </select>
-      </div>
-
       <!-- Busca livre -->
       <div class="col-12 col-sm col-md">
         <label class="form-label form-label-sm fw-semibold mb-1" for="buscaColab">
           <i class="bi bi-search me-1"></i>Busca
         </label>
         <input type="search" id="buscaColab" class="form-control form-control-sm"
-               placeholder="Nome ou matrícula..."
+               placeholder="Nome ou código..."
                oninput="aplicarFiltros()">
       </div>
 
@@ -149,11 +136,10 @@
       <thead class="table-dark">
         <tr>
           <th style="width:60px">Tipo</th>
-          <th style="width:90px">Matrícula</th>
+          <th style="width:90px">Código</th>
           <th>Nome</th>
-          <th>Cargo</th>
+          <th>Função</th>
           <th>Departamento</th>
-          <th>Gestor</th>
           <th style="width:100px">Admissão</th>
         </tr>
       </thead>
@@ -163,7 +149,6 @@
           data-tipo="{{ c.tipo }}"
           data-cargo="{{ c.cargo | upper }}"
           data-depto="{{ c.departamento | upper }}"
-          data-gestor="{{ c.gestor | upper }}"
           data-nome="{{ c.nome | upper }}"
           data-matricula="{{ c.matricula }}"
         >
@@ -176,7 +161,6 @@
           <td class="fw-semibold">{{ c.nome }}</td>
           <td class="small">{{ c.cargo }}</td>
           <td class="small">{{ c.departamento }}</td>
-          <td class="small text-muted">{{ c.gestor }}</td>
           <td class="small text-muted">{{ c.admissao }}</td>
         </tr>
         {% endfor %}
@@ -199,29 +183,24 @@ const TOTAL_GERAL = {{ total }};
 let filtroTipo   = 'todos';
 let filtroCargo  = '';
 let filtroDepto  = '';
-let filtroGestor = '';
 let filtroBusca  = '';
 
 // ── Popula dropdowns com valores únicos da tabela ───────────────────────────
 document.addEventListener('DOMContentLoaded', function () {
   const rows = document.querySelectorAll('#tblColaboradores tbody tr');
 
-  const cargos   = new Set();
-  const deptos   = new Set();
-  const gestores = new Set();
+  const cargos = new Set();
+  const deptos = new Set();
 
   rows.forEach(row => {
     const c = row.dataset.cargo?.trim();
     const d = row.dataset.depto?.trim();
-    const g = row.dataset.gestor?.trim();
     if (c) cargos.add(c);
     if (d) deptos.add(d);
-    if (g) gestores.add(g);
   });
 
-  preencherSelect('filtroCargo',  [...cargos].sort(),   'Todos os cargos');
-  preencherSelect('filtroDepto',  [...deptos].sort(),   'Todos os departamentos');
-  preencherSelect('filtroGestor', [...gestores].sort(), 'Todos os gestores');
+  preencherSelect('filtroCargo', [...cargos].sort(), 'Todas as funções');
+  preencherSelect('filtroDepto', [...deptos].sort(), 'Todos os departamentos');
 
   atualizarRodape(TOTAL_GERAL);
 });
@@ -258,7 +237,6 @@ function filtrarTipo(tipo) {
 function aplicarFiltros() {
   filtroCargo  = document.getElementById('filtroCargo').value.toUpperCase();
   filtroDepto  = document.getElementById('filtroDepto').value.toUpperCase();
-  filtroGestor = document.getElementById('filtroGestor').value.toUpperCase();
   filtroBusca  = document.getElementById('buscaColab').value.toLowerCase().trim();
 
   const rows = document.querySelectorAll('#tblColaboradores tbody tr');
@@ -268,19 +246,17 @@ function aplicarFiltros() {
     const tipo     = row.dataset.tipo;
     const cargo    = row.dataset.cargo  || '';
     const depto    = row.dataset.depto  || '';
-    const gestor   = row.dataset.gestor || '';
     const nome     = row.dataset.nome   || '';
     const matricula = row.dataset.matricula || '';
 
     const okTipo   = filtroTipo   === 'todos' || tipo === filtroTipo;
     const okCargo  = !filtroCargo  || cargo  === filtroCargo;
     const okDepto  = !filtroDepto  || depto  === filtroDepto;
-    const okGestor = !filtroGestor || gestor === filtroGestor;
     const okBusca  = !filtroBusca  ||
                      nome.toLowerCase().includes(filtroBusca) ||
                      matricula.toLowerCase().includes(filtroBusca);
 
-    const visivel = okTipo && okCargo && okDepto && okGestor && okBusca;
+    const visivel = okTipo && okCargo && okDepto && okBusca;
     row.style.display = visivel ? '' : 'none';
     if (visivel) visiveis++;
   });
@@ -293,7 +269,6 @@ function aplicarFiltros() {
 function limparFiltros() {
   document.getElementById('filtroCargo').value  = '';
   document.getElementById('filtroDepto').value  = '';
-  document.getElementById('filtroGestor').value = '';
   document.getElementById('buscaColab').value   = '';
   filtrarTipo('todos');
 }

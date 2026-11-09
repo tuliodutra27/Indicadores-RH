@@ -166,9 +166,9 @@
 
           <td class="text-end">
             <div class="btn-group btn-group-sm">
-              <a href="{{ url_for('organograma', id=item.id) }}"
-                 class="btn btn-outline-primary" title="Ver organograma">
-                <i class="bi bi-diagram-3"></i>
+              <a href="{{ url_for('colaboradores', id=item.id) }}"
+                 class="btn btn-outline-primary" title="Ver efetivo">
+                <i class="bi bi-people"></i>
               </a>
               {% if not item.is_baseline %}
               <a href="{{ url_for('resultado', id=item.id) }}"

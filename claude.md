@@ -12,7 +12,9 @@ e alterações** em uma interface web com controle de acesso via AD.
 
 ## Estado atual
 **SISTEMA WEB FUNCIONANDO EM DOCKER.**
-- Script CLI original: `comparador_rh_v2.py` (mantido como referência)
+- Script CLI original: `comparador_rh_v2.py` (mantido como referência — continua no modelo
+  ANTIGO da planilha, com Matrícula/Cargo/Gestor; não foi adaptado ao modelo novo)
+- O módulo de organograma foi removido do projeto (decisão de nov/2026); fica no histórico do git
 - Aplicação web: pasta `web/` (Flask + Docker)
 
 ---
@@ -57,10 +59,11 @@ data/
 ## Decisões e regras de negócio
 
 1. **Chave de identificação**:
-   - CLT → coluna MATRÍCULA → chave `CLT::<matrícula>`
-   - PJ → não tem matrícula numérica → identificado pelo NOME → chave `PJ::<nome>`
+   - CLT → coluna CÓDIGO (antes MATRÍCULA) → chave `CLT::<código>`
+   - PJ → CÓDIGO vazio ou "PJ" (qualquer caixa) → identificado pelo NOME → chave `PJ::<nome>`
 
-2. **Campos monitorados para "alteração"**: CARGO, DEPARTAMENTO, GESTOR
+2. **Campos monitorados para "alteração"**: FUNÇÃO (antes CARGO), DEPARTAMENTO
+   (o campo GESTOR deixou de existir na planilha do RH e foi removido do sistema)
 
 3. **Snapshots**: cada planilha enviada é salva como snapshot para a próxima comparação.
    Primeira vez = baseline (sem diferenças). Segunda vez em diante = mostra diff.
@@ -71,7 +74,16 @@ data/
 
 ---
 
-## Colunas da planilha (após normalização para MAIÚSCULAS)
+## Colunas da planilha — modelo atual do RH (nov/2026)
+Arquivo `.xls`/`.xlsx` com duas abas: **`Ativos `** (efetivo — a única lida; os nomes das
+abas vêm com espaço no final) e `Demitidos ` (ignorada). Na aba Ativos a linha 1 é um
+título e o cabeçalho fica na linha 2 (localizado automaticamente, em qualquer linha).
+Colunas: `Código, Nome, Função, Departamento, Data de Admissão`.
+Nomes antigos (Matrícula, Cargo, Admissão) ainda são aceitos, para comparar com snapshots
+antigos. Chaves do JSON dos relatórios continuam `matricula`/`cargo`/`admissao` de propósito
+(relatórios gravados antes da mudança precisam continuar abrindo).
+
+## Colunas do modelo ANTIGO (referência; após normalização para MAIÚSCULAS)
 `MATRÍCULA, NOME, CARGO, DEPARTAMENTO, GESTOR, ADMISSÃO, MOI/MOD, ADM/TURNO, LETRA`
 
 ---
@@ -102,7 +114,7 @@ docker compose up -d
 1. **Matrícula "610.0"**: pandas lê número como float. Script remove o `.0`.
 2. **Linha em branco no rodapé** → `PJ::NAN`: descarta linhas sem matrícula E sem nome.
 3. **Linha em branco no TOPO**: deslocava o cabeçalho.
-   → Solução atual: usuário corrige na planilha. Melhoria futura: detectar header automaticamente.
+   → Resolvido: o cabeçalho agora é detectado automaticamente (web). O CLI antigo ainda sofre disso.
 
 ## Problemas de dados conhecidos (na fonte, não no código)
 
@@ -115,7 +127,7 @@ docker compose up -d
 ## Stack
 
 - Python 3.12 + Flask 3.1 + gunicorn
-- pandas + openpyxl (processamento de planilhas)
+- pandas + openpyxl + xlrd (processamento de planilhas `.xlsx` e `.xls`)
 - ldap3 (autenticação AD)
 - Bootstrap 5 (UI)
 - Docker + Docker Compose
@@ -124,7 +136,7 @@ docker compose up -d
 
 ## Pendências / melhorias futuras
 
-- [ ] Auto-detectar header mesmo com linhas em branco no topo
+- [x] Auto-detectar header mesmo com linhas em branco no topo (feito na versão web)
 - [ ] Tratar matrículas duplicadas com nomes diferentes de forma mais visível
 - [ ] Notificação por e-mail ao processar uma planilha
 - [ ] Filtro por data no histórico do dashboard

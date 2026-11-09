@@ -14,9 +14,6 @@
       <a href="{{ url_for('colaboradores', id=dados.id) }}" class="btn btn-sm btn-outline-primary">
         <i class="bi bi-people me-1"></i>Efetivo completo
       </a>
-      <a href="{{ url_for('organograma', id=dados.id) }}" class="btn btn-sm btn-outline-primary">
-        <i class="bi bi-diagram-3 me-1"></i>Organograma
-      </a>
     </div>
     <h2 class="fw-bold mb-1">
       <i class="bi bi-file-earmark-bar-graph text-primary me-2"></i>
@@ -132,7 +129,7 @@
     <!-- Campo de busca -->
     <div class="mb-3">
       <input type="search" class="form-control form-control-sm w-auto"
-             placeholder="Filtrar por nome, cargo..."
+             placeholder="Filtrar por nome, função..."
              oninput="filtrarTabela(this, 'tblAdmissoes')">
     </div>
     <div class="table-responsive">
@@ -140,11 +137,10 @@
         <thead class="table-success">
           <tr>
             <th>Tipo</th>
-            <th>Matrícula</th>
+            <th>Código</th>
             <th>Nome</th>
-            <th>Cargo</th>
+            <th>Função</th>
             <th>Departamento</th>
-            <th>Gestor</th>
             <th>Admissão</th>
           </tr>
         </thead>
@@ -156,7 +152,6 @@
             <td class="fw-semibold">{{ p.nome }}</td>
             <td>{{ p.cargo }}</td>
             <td>{{ p.departamento }}</td>
-            <td>{{ p.gestor }}</td>
             <td>{{ p.admissao }}</td>
           </tr>
           {% endfor %}
@@ -176,7 +171,7 @@
     {% if dados.remocoes %}
     <div class="mb-3">
       <input type="search" class="form-control form-control-sm w-auto"
-             placeholder="Filtrar por nome, cargo..."
+             placeholder="Filtrar por nome, função..."
              oninput="filtrarTabela(this, 'tblDesligamentos')">
     </div>
     <div class="table-responsive">
@@ -184,11 +179,10 @@
         <thead class="table-danger">
           <tr>
             <th>Tipo</th>
-            <th>Matrícula</th>
+            <th>Código</th>
             <th>Nome</th>
-            <th>Cargo</th>
+            <th>Função</th>
             <th>Departamento</th>
-            <th>Gestor</th>
           </tr>
         </thead>
         <tbody>
@@ -199,7 +193,6 @@
             <td class="fw-semibold">{{ p.nome }}</td>
             <td>{{ p.cargo }}</td>
             <td>{{ p.departamento }}</td>
-            <td>{{ p.gestor }}</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -218,7 +211,7 @@
     {% if dados.alteracoes %}
     <div class="mb-3">
       <input type="search" class="form-control form-control-sm w-auto"
-             placeholder="Filtrar por nome, cargo..."
+             placeholder="Filtrar por nome, função..."
              oninput="filtrarTabela(this, 'tblAlteracoes')">
     </div>
     <div class="table-responsive">
@@ -226,16 +219,13 @@
         <thead class="table-warning">
           <tr>
             <th>Tipo</th>
-            <th>Matrícula</th>
+            <th>Código</th>
             <th>Nome</th>
-            <th colspan="2" class="text-center">Cargo</th>
+            <th colspan="2" class="text-center">Função</th>
             <th colspan="2" class="text-center">Departamento</th>
-            <th colspan="2" class="text-center">Gestor</th>
           </tr>
           <tr class="table-warning">
             <th></th><th></th><th></th>
-            <th class="text-muted fw-normal small">Antes</th>
-            <th class="text-muted fw-normal small">Depois</th>
             <th class="text-muted fw-normal small">Antes</th>
             <th class="text-muted fw-normal small">Depois</th>
             <th class="text-muted fw-normal small">Antes</th>
@@ -249,7 +239,7 @@
             <td class="font-monospace">{{ p.matricula }}</td>
             <td class="fw-semibold">{{ p.nome }}</td>
 
-            {# Cargo #}
+            {# Função #}
             <td class="{{ 'diff-antes' if p.cargo_mudou else '' }}">
               {% if p.cargo_mudou %}
                 <span class="text-danger"><del>{{ p.cargo_antes }}</del></span>
@@ -278,22 +268,6 @@
                 <span class="fw-bold text-success">{{ p.departamento_depois }}</span>
               {% else %}
                 {{ p.departamento_depois }}
-              {% endif %}
-            </td>
-
-            {# Gestor #}
-            <td class="{{ 'diff-antes' if p.gestor_mudou else '' }}">
-              {% if p.gestor_mudou %}
-                <span class="text-danger"><del>{{ p.gestor_antes }}</del></span>
-              {% else %}
-                {{ p.gestor_antes }}
-              {% endif %}
-            </td>
-            <td class="{{ 'diff-depois' if p.gestor_mudou else '' }}">
-              {% if p.gestor_mudou %}
-                <span class="fw-bold text-success">{{ p.gestor_depois }}</span>
-              {% else %}
-                {{ p.gestor_depois }}
               {% endif %}
             </td>
           </tr>
